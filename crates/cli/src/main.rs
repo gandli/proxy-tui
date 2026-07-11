@@ -32,6 +32,7 @@ fn main() -> anyhow::Result<()> {
         Commands::UserDel { name } => commands::user::del(&config, &name)?,
         Commands::UserLink { name } => commands::user::link(&config, &name)?,
         Commands::CoreInstall { core, version } => commands::core_install::run(&core, &version)?,
+        Commands::Core { action, core } => commands::core_ctl::run(&core, &action)?,
     }
     Ok(())
 }

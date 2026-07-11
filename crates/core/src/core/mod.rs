@@ -41,6 +41,47 @@ pub trait ProxyCore {
     /// 构造重载命令(不执行)。
     fn reload_cmd(&self) -> crate::executor::Cmd;
 
+    /// systemd 服务名(默认 vagent-<id>)。
+    fn service_name(&self) -> String {
+        format!("vagent-{}", self.id())
+    }
+
+    /// 生命周期命令拼装(纯函数,便于单测)。
+    fn lifecycle_cmd(&self, action: &str) -> crate::executor::Cmd {
+        crate::executor::Cmd::new("systemctl").args([action, &self.service_name()])
+    }
+
+    /// 执行生命周期动作(start/stop/restart/enable/disable/status)。
+    fn lifecycle(&self, action: &str, ex: &dyn Executor) -> Result<String, Error> {
+        let out = ex.run(&self.lifecycle_cmd(action))?;
+        if out.ok() {
+            Ok(out.stdout)
+        } else {
+            Err(Error::Render(format!(
+                "{} {} failed: {}",
+                self.id(),
+                action,
+                out.stderr
+            )))
+        }
+    }
+
+    fn start(&self, ex: &dyn Executor) -> Result<(), Error> {
+        self.lifecycle("start", ex).map(|_| ())
+    }
+    fn stop(&self, ex: &dyn Executor) -> Result<(), Error> {
+        self.lifecycle("stop", ex).map(|_| ())
+    }
+    fn restart(&self, ex: &dyn Executor) -> Result<(), Error> {
+        self.lifecycle("restart", ex).map(|_| ())
+    }
+    fn enable(&self, ex: &dyn Executor) -> Result<(), Error> {
+        self.lifecycle("enable", ex).map(|_| ())
+    }
+    fn disable(&self, ex: &dyn Executor) -> Result<(), Error> {
+        self.lifecycle("disable", ex).map(|_| ())
+    }
+
     /// 执行安装(经 Executor)。
     fn install(&self, version: &str, ex: &dyn Executor) -> Result<(), Error> {
         let out = ex.run(&self.install_cmd(version))?;
@@ -150,5 +191,31 @@ mod tests {
         assert!(h
             .iter()
             .any(|c| c.program == "systemctl" && c.args.contains(&"vagent-xray".to_string())));
+    }
+
+    #[test]
+    fn lifecycle_cmd_builds_systemctl() {
+        let c = XrayCore.lifecycle_cmd("restart");
+        assert_eq!(c.program, "systemctl");
+        assert!(c.args.contains(&"restart".to_string()));
+        assert!(c.args.contains(&"vagent-xray".to_string()));
+    }
+
+    #[test]
+    fn lifecycle_start_via_executor() {
+        let ex = FakeExecutor::new().expect("systemctl", ExecOutput::success(""));
+        XrayCore.start(&ex).unwrap();
+    }
+
+    #[test]
+    fn lifecycle_failure_propagates() {
+        let ex = FakeExecutor::new().expect("systemctl", ExecOutput::failure(1, "unit not found"));
+        assert!(SingboxCore.enable(&ex).is_err());
+    }
+
+    #[test]
+    fn service_name_default() {
+        assert_eq!(XrayCore.service_name(), "vagent-xray");
+        assert_eq!(SingboxCore.service_name(), "vagent-singbox");
     }
 }

@@ -65,4 +65,12 @@ pub enum Commands {
         #[arg(long, default_value = "1.8.0")]
         version: String,
     },
+    /// 内核生命周期:start/stop/restart/enable/disable
+    Core {
+        /// 动作
+        action: String,
+        /// 内核:xray / singbox
+        #[arg(long, default_value = "xray")]
+        core: String,
+    },
 }
