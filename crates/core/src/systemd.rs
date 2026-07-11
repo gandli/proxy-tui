@@ -2,8 +2,8 @@
 //! 支持 systemd(主流)与 openrc(Alpine)。真实 enable 在 VPS 上执行。
 
 use crate::Error;
-use std::path::{Path, PathBuf};
 use libc;
+use std::path::{Path, PathBuf};
 
 /// init 系统类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +31,10 @@ pub fn unit_install_path(init: InitSystem, core: &str, _base: &Path) -> PathBuf 
     match init {
         InitSystem::Systemd => {
             if is_root() {
-                PathBuf::from(format!("/etc/systemd/system/{}.service", service_name(core)))
+                PathBuf::from(format!(
+                    "/etc/systemd/system/{}.service",
+                    service_name(core)
+                ))
             } else {
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
                 PathBuf::from(home)
@@ -256,15 +259,26 @@ mod tests {
 
     #[test]
     fn unit_install_path_root_vs_user() {
-        let root_path = unit_install_path(InitSystem::Systemd, "xray", Path::new("/etc/vagent/spec.toml"));
+        let root_path = unit_install_path(
+            InitSystem::Systemd,
+            "xray",
+            Path::new("/etc/vagent/spec.toml"),
+        );
         // 普通用户路径必须在 $HOME/.config/systemd/user(而非 base 目录内)
         assert!(root_path.to_string_lossy().contains(".config/systemd/user"));
         // 不应出现双重 .config(旧 bug: base 内又拼 .config)
-        assert!(!root_path.to_string_lossy().contains("/.config/vagent/.config"));
+        assert!(!root_path
+            .to_string_lossy()
+            .contains("/.config/vagent/.config"));
         if is_root() {
-            assert_eq!(root_path.to_string_lossy(), "/etc/systemd/system/vagent-xray.service");
+            assert_eq!(
+                root_path.to_string_lossy(),
+                "/etc/systemd/system/vagent-xray.service"
+            );
         } else {
-            assert!(root_path.to_string_lossy().ends_with("/.config/systemd/user/vagent-xray.service"));
+            assert!(root_path
+                .to_string_lossy()
+                .ends_with("/.config/systemd/user/vagent-xray.service"));
         }
     }
 }

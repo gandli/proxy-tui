@@ -40,11 +40,17 @@ impl ProxyCore for SingboxCore {
     fn install(&self, version: &str, ex: &dyn Executor) -> Result<(), Error> {
         let out = ex.run(&self.install_cmd(version))?;
         if !out.ok() {
-            return Err(Error::Render(format!("sing-box download failed: {}", out.stderr)));
+            return Err(Error::Render(format!(
+                "sing-box download failed: {}",
+                out.stderr
+            )));
         }
         let out = ex.run(&Cmd::new("tar").args(["xzf", "/tmp/sing-box.tar.gz"]))?;
         if !out.ok() {
-            return Err(Error::Render(format!("sing-box extract failed: {}", out.stderr)));
+            return Err(Error::Render(format!(
+                "sing-box extract failed: {}",
+                out.stderr
+            )));
         }
         let dest = if crate::systemd::is_root() {
             "/usr/local/bin".to_string()
@@ -58,11 +64,17 @@ impl ProxyCore for SingboxCore {
         };
         let place = Cmd::new("sh").args([
             "-c",
-            &format!("mkdir -p {d} && mv sing-box-*/sing-box {d}/sing-box", d = dest),
+            &format!(
+                "mkdir -p {d} && mv sing-box-*/sing-box {d}/sing-box",
+                d = dest
+            ),
         ]);
         let out = ex.run(&place)?;
         if !out.ok() {
-            return Err(Error::Render(format!("sing-box place failed: {}", out.stderr)));
+            return Err(Error::Render(format!(
+                "sing-box place failed: {}",
+                out.stderr
+            )));
         }
         Ok(())
     }
