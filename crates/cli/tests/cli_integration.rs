@@ -260,6 +260,7 @@ fn apply_renders_singbox_when_hy2_user() -> Result<(), Box<dyn std::error::Error
         .arg(&cfg)
         .assert()
         .success();
+
     Command::cargo_bin("vagent")
         .unwrap()
         .args([
@@ -284,5 +285,46 @@ fn apply_renders_singbox_when_hy2_user() -> Result<(), Box<dyn std::error::Error
         .success()
         .stdout(predicate::str::contains("singbox"))
         .stdout(predicate::str::contains("tuic"));
+    Ok(())
+}
+
+#[test]
+fn cert_path_follows_config_dir_not_root() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = tempfile::tempdir()?;
+    let cfg = tmp.path().join("vagent").join("spec.toml");
+
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["init", "--domain", "v.example.com", "--config"])
+        .arg(&cfg)
+        .assert()
+        .success();
+
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["user-add", "t", "--protocol", "tuic", "--port", "9443", "--config"])
+        .arg(&cfg)
+        .assert()
+        .success();
+
+    // 渲染 sing-box,cert 路径必须落在 cfg 的父目录(临时目录),而非 /certs 或 /etc
+    let out = Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["render", "--core", "singbox", "--config"])
+        .arg(&cfg)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains(&format!(
+            "{}/certs/v.example.com.cer",
+            cfg.parent().unwrap().display()
+        )),
+        "cert 路径未跟随 config 目录: {stdout}"
+    );
+    assert!(
+        !stdout.contains("\"/certs/"),
+        "cert 路径错误地落在根目录: {stdout}"
+    );
     Ok(())
 }
