@@ -302,7 +302,15 @@ fn cert_path_follows_config_dir_not_root() -> Result<(), Box<dyn std::error::Err
 
     Command::cargo_bin("vagent")
         .unwrap()
-        .args(["user-add", "t", "--protocol", "tuic", "--port", "9443", "--config"])
+        .args([
+            "user-add",
+            "t",
+            "--protocol",
+            "tuic",
+            "--port",
+            "9443",
+            "--config",
+        ])
         .arg(&cfg)
         .assert()
         .success();
