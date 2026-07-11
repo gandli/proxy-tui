@@ -5,6 +5,7 @@ use crate::executor::Cmd;
 use crate::render::singbox;
 use crate::spec::Spec;
 use crate::Error;
+use std::path::Path;
 
 pub struct SingboxCore;
 
@@ -13,10 +14,12 @@ impl ProxyCore for SingboxCore {
         "singbox"
     }
 
-    fn render(&self, spec: &Spec) -> Result<Rendered, Error> {
+    fn render(&self, spec: &Spec, config: &Path) -> Result<Rendered, Error> {
+        let base_dir = Spec::base_dir(config);
+        let path = base_dir.join("cores").join("singbox").join("config.json");
         Ok(Rendered {
-            path: "/etc/vagent/cores/singbox/config.json".to_string(),
-            content: singbox::render_string(spec)?,
+            path: path.to_string_lossy().to_string(),
+            content: singbox::render_string(spec, &base_dir)?,
         })
     }
 

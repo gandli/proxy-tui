@@ -170,6 +170,31 @@ impl Spec {
         }
     }
 
+    /// 配置文件的默认路径:root 用 /etc/vagent/spec.toml,普通用户用 ~/.config/vagent/spec.toml。
+    pub fn default_config_path() -> std::path::PathBuf {
+        if let Ok(uid) = std::env::var("UID") {
+            if uid == "0" {
+                return std::path::PathBuf::from("/etc/vagent/spec.toml");
+            }
+        } else if unsafe { libc::getuid() } == 0 {
+            return std::path::PathBuf::from("/etc/vagent/spec.toml");
+        }
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(home)
+            .join(".config")
+            .join("vagent")
+            .join("spec.toml")
+    }
+
+    /// 派生目录锚点:配置文件的父目录。所有 cores/certs/扫描 路径都从它推导,
+    /// 不硬编码 /etc,从而支持普通用户安装。
+    pub fn base_dir(config: &std::path::Path) -> std::path::PathBuf {
+        config
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+    }
+
     /// 新增一个用户,自动生成 id / uuid。
     pub fn add_user(&mut self, name: &str, protocol: Protocol, port: u16, reality: bool) {
         self.users

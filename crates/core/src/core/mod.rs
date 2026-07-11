@@ -33,7 +33,7 @@ pub trait ProxyCore {
     fn id(&self) -> &'static str;
 
     /// 把 Spec 渲染成该内核的配置文件(纯函数,不落盘)。
-    fn render(&self, spec: &Spec) -> Result<Rendered, Error>;
+    fn render(&self, spec: &Spec, config: &Path) -> Result<Rendered, Error>;
 
     /// 构造安装命令(不执行)。
     fn install_cmd(&self, version: &str) -> crate::executor::Cmd;
@@ -113,21 +113,22 @@ pub trait ProxyCore {
 
 /// 渲染所有需要的内核配置(纯函数,不落盘,可单测)。
 /// 内核启用 = 显式 cores 开关 OR 存在对应协议用户(自动启用)。
-pub fn plan(spec: &Spec) -> Result<Vec<Rendered>, Error> {
+/// config 用于推导派生目录锚点(支持普通用户安装)。
+pub fn plan(spec: &Spec, config: &Path) -> Result<Vec<Rendered>, Error> {
     let mut out = vec![];
     if spec.cores.xray || spec.needs_xray() {
-        out.push(XrayCore.render(spec)?);
+        out.push(XrayCore.render(spec, config)?);
     }
     if spec.cores.singbox || spec.needs_singbox() {
-        out.push(SingboxCore.render(spec)?);
+        out.push(SingboxCore.render(spec, config)?);
     }
     Ok(out)
 }
 
 /// 应用:渲染 → 写隔离路径 → 经 Executor 重载。
 /// 真实写盘(需 root)不在单测范围,由 VPS E2E 覆盖。
-pub fn apply(spec: &Spec, ex: &dyn Executor) -> Result<(), Error> {
-    for r in plan(spec)? {
+pub fn apply(spec: &Spec, config: &Path, ex: &dyn Executor) -> Result<(), Error> {
+    for r in plan(spec, config)? {
         write_rendered(&r)?;
         reload_by_path(&r.path, ex)?;
     }
@@ -158,12 +159,13 @@ mod tests {
     use super::*;
     use crate::executor::{take_history, ExecOutput, FakeExecutor};
     use crate::spec::Spec;
+    use std::path::Path;
 
     #[test]
     fn render_all_respects_enabled_cores() {
         let mut spec = Spec::default_for("x.com");
         spec.cores.singbox = true;
-        let rs = plan(&spec).unwrap();
+        let rs = plan(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         assert_eq!(rs.len(), 2);
         assert!(rs.iter().any(|r| r.path.contains("xray")));
         assert!(rs.iter().any(|r| r.path.contains("singbox")));
@@ -172,7 +174,7 @@ mod tests {
     #[test]
     fn render_all_single_core_when_singbox_off() {
         let spec = Spec::default_for("x.com");
-        let rs = plan(&spec).unwrap();
+        let rs = plan(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         assert_eq!(rs.len(), 1);
         assert!(rs[0].path.contains("xray"));
     }
@@ -183,7 +185,7 @@ mod tests {
         let spec = Spec::default_for("x.com");
         let ex = FakeExecutor::new().expect("systemctl", ExecOutput::success(""));
         // 用 plan(纯渲染)+ 手动 reload 验证逻辑,不触发真实写盘
-        let rendered = plan(&spec).unwrap();
+        let rendered = plan(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         for r in &rendered {
             reload_by_path(&r.path, &ex).unwrap();
         }

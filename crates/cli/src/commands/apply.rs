@@ -12,7 +12,7 @@ pub fn run(config: &Path, dry_run: bool) -> anyhow::Result<()> {
         }
     };
 
-    let rendered = vagent_core::plan(&spec)?;
+    let rendered = vagent_core::plan(&spec, config)?;
 
     if dry_run {
         for r in &rendered {

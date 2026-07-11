@@ -134,15 +134,14 @@ fn apply_dry_run_prints_full_config() -> Result<(), Box<dyn std::error::Error>> 
         .assert()
         .success();
 
+    let expected = format!("{}/cores/xray/config.json", cfg.parent().unwrap().display());
     Command::cargo_bin("vagent")
         .unwrap()
         .args(["apply", "--dry-run", "--config"])
         .arg(&cfg)
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "/etc/vagent/cores/xray/config.json",
-        ))
+        .stdout(predicate::str::contains(expected))
         .stdout(predicate::str::contains("\"blackhole\""))
         .stdout(predicate::str::contains("\"reality\""));
     Ok(())
@@ -168,15 +167,14 @@ fn apply_writes_config_file() -> Result<(), Box<dyn std::error::Error>> {
         .success();
 
     // 真实落盘需 root(/etc/vagent),此处验证 dry-run 渲染与写盘路径打印一致
+    let expected = format!("{}/cores/xray/config.json", cfg.parent().unwrap().display());
     Command::cargo_bin("vagent")
         .unwrap()
         .args(["apply", "--dry-run", "--config"])
         .arg(&cfg)
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "/etc/vagent/cores/xray/config.json",
-        ));
+        .stdout(predicate::str::contains(expected));
     Ok(())
 }
 

@@ -5,6 +5,7 @@ use crate::executor::Cmd;
 use crate::render::xray;
 use crate::spec::Spec;
 use crate::Error;
+use std::path::Path;
 
 pub struct XrayCore;
 
@@ -13,10 +14,12 @@ impl ProxyCore for XrayCore {
         "xray"
     }
 
-    fn render(&self, spec: &Spec) -> Result<Rendered, Error> {
+    fn render(&self, spec: &Spec, config: &Path) -> Result<Rendered, Error> {
+        let base_dir = Spec::base_dir(config);
+        let path = base_dir.join("cores").join("xray").join("config.json");
         Ok(Rendered {
-            path: "/etc/vagent/cores/xray/config.json".to_string(),
-            content: xray::render_string(spec)?,
+            path: path.to_string_lossy().to_string(),
+            content: xray::render_string(spec, &base_dir)?,
         })
     }
 
@@ -43,10 +46,16 @@ mod tests {
     use super::*;
     use crate::executor::FakeExecutor;
     use crate::spec::Spec;
+    use std::path::Path;
 
     #[test]
     fn render_path_is_isolated() {
-        let r = XrayCore.render(&Spec::default_for("x.com")).unwrap();
+        let r = XrayCore
+            .render(
+                &Spec::default_for("x.com"),
+                Path::new("/etc/vagent/spec.toml"),
+            )
+            .unwrap();
         assert_eq!(r.path, "/etc/vagent/cores/xray/config.json");
         assert!(r.content.contains("freedom"));
     }

@@ -6,7 +6,20 @@ use vagent_core::executor::RealExecutor;
 use vagent_core::reality::{generate_public_key, generate_short_id};
 use vagent_core::{load_spec, save_spec};
 
-const XRAY_BIN: &str = "/usr/local/bin/xray";
+/// xray 二进制路径:root 用 /usr/local/bin,普通用户用 ~/.local/bin。
+fn xray_bin() -> String {
+    if unsafe { libc::getuid() } == 0 {
+        "/usr/local/bin/xray".to_string()
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(home)
+            .join(".local")
+            .join("bin")
+            .join("xray")
+            .to_string_lossy()
+            .to_string()
+    }
+}
 
 /// 为指定用户(按名字)生成 Reality 公钥 + shortId 并写回 spec。
 /// name 为空则对所有 reality 用户批量生成。
@@ -16,7 +29,7 @@ pub fn run(config: &Path, name: Option<&str>) -> anyhow::Result<()> {
         Err(e) => return Err(anyhow::anyhow!("加载配置失败: {e}")),
     };
 
-    let keys = generate_public_key(XRAY_BIN, &RealExecutor).map_err(|e| anyhow::anyhow!(e))?;
+    let keys = generate_public_key(&xray_bin(), &RealExecutor).map_err(|e| anyhow::anyhow!(e))?;
     let sid = generate_short_id();
 
     let targets: Vec<String> = match name {

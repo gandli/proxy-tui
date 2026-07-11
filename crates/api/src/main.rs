@@ -69,8 +69,10 @@ async fn api_render(
     State(state): State<SharedState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     use vagent_core::render::xray;
+    use vagent_core::spec::Spec;
     let spec = load_spec(&state.config).map_err(|_| StatusCode::NOT_FOUND)?;
-    let out = xray::render(&spec).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let out = xray::render(&spec, &Spec::base_dir(&state.config))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(out))
 }
 
