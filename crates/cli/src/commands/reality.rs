@@ -6,8 +6,27 @@ use vagent_core::executor::RealExecutor;
 use vagent_core::reality::{generate_public_key, generate_short_id};
 use vagent_core::{load_spec, save_spec};
 
-/// xray 二进制路径:root 用 /usr/local/bin,普通用户用 ~/.local/bin。
+/// xray 二进制路径解析优先级:
+/// 1. 环境变量 XRAY_BIN(显式覆盖,CI/自定义安装用)
+/// 2. PATH 中的 xray(which 可见即返回 "xray")
+/// 3. 回退:root 用 /usr/local/bin/xray,普通用户用 ~/.local/bin/xray
 fn xray_bin() -> String {
+    if let Ok(b) = std::env::var("XRAY_BIN") {
+        if !b.is_empty() {
+            return b;
+        }
+    }
+    // 尝试 PATH 解析
+    if let Ok(out) = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("command -v xray || true")
+        .output()
+    {
+        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !p.is_empty() {
+            return p;
+        }
+    }
     if unsafe { libc::getuid() } == 0 {
         "/usr/local/bin/xray".to_string()
     } else {
