@@ -33,13 +33,28 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// 新增用户(MVP: VLESS+Reality)
+    /// 新增用户(默认 VLESS+Reality,可选其他协议)
     UserAdd {
         /// 用户名
         name: String,
         /// 端口
         #[arg(long, default_value_t = 443)]
         port: u16,
+        /// 协议:vless/vmess/trojan/hysteria2/tuic/naive
+        #[arg(long, default_value = "vless")]
+        protocol: String,
+    },
+    /// 列出所有用户
+    UserList,
+    /// 删除用户(按名字)
+    UserDel {
+        /// 用户名
+        name: String,
+    },
+    /// 生成用户的分享链接
+    UserLink {
+        /// 用户名
+        name: String,
     },
     /// 安装内核二进制
     CoreInstall {

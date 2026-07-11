@@ -66,6 +66,35 @@ pub enum Protocol {
     Naive,
 }
 
+impl std::str::FromStr for Protocol {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "vless" => Ok(Protocol::Vless),
+            "vmess" => Ok(Protocol::Vmess),
+            "trojan" => Ok(Protocol::Trojan),
+            "hysteria2" | "hy2" => Ok(Protocol::Hysteria2),
+            "tuic" => Ok(Protocol::Tuic),
+            "naive" => Ok(Protocol::Naive),
+            other => Err(format!("未知协议: {other}")),
+        }
+    }
+}
+
+impl std::fmt::Display for Protocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Protocol::Vless => "vless",
+            Protocol::Vmess => "vmess",
+            Protocol::Trojan => "trojan",
+            Protocol::Hysteria2 => "hysteria2",
+            Protocol::Tuic => "tuic",
+            Protocol::Naive => "naive",
+        };
+        f.write_str(s)
+    }
+}
+
 impl Default for Cores {
     fn default() -> Self {
         Cores {
@@ -90,6 +119,30 @@ impl Spec {
     /// 新增一个用户,自动生成 id / uuid。
     pub fn add_user(&mut self, name: &str, protocol: Protocol, port: u16, reality: bool) {
         self.users.push(User::new(name, protocol, port, reality));
+    }
+
+    /// 按名字删除用户,返回删除的数量。
+    pub fn remove_user(&mut self, name: &str) -> usize {
+        let before = self.users.len();
+        self.users.retain(|u| u.name != name);
+        before - self.users.len()
+    }
+
+    /// 是否存在需要 sing-box 承载的协议(Hysteria2 / Tuic)。
+    pub fn needs_singbox(&self) -> bool {
+        self.users
+            .iter()
+            .any(|u| matches!(u.protocol, Protocol::Hysteria2 | Protocol::Tuic))
+    }
+
+    /// 是否存在需要 Xray 承载的协议。
+    pub fn needs_xray(&self) -> bool {
+        self.users.iter().any(|u| {
+            matches!(
+                u.protocol,
+                Protocol::Vless | Protocol::Vmess | Protocol::Trojan
+            )
+        })
     }
 }
 

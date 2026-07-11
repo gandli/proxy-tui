@@ -23,7 +23,14 @@ fn main() -> anyhow::Result<()> {
         Commands::Status => commands::status::run(&config)?,
         Commands::Render => commands::render::run(&config)?,
         Commands::Apply { dry_run } => commands::apply::run(&config, dry_run)?,
-        Commands::UserAdd { name, port } => commands::user::add(&config, &name, port)?,
+        Commands::UserAdd {
+            name,
+            port,
+            protocol,
+        } => commands::user::add(&config, &name, port, &protocol)?,
+        Commands::UserList => commands::user::list(&config)?,
+        Commands::UserDel { name } => commands::user::del(&config, &name)?,
+        Commands::UserLink { name } => commands::user::link(&config, &name)?,
         Commands::CoreInstall { core, version } => commands::core_install::run(&core, &version)?,
     }
     Ok(())

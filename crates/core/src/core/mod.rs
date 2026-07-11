@@ -70,13 +70,14 @@ pub trait ProxyCore {
     }
 }
 
-/// 渲染所有启用内核的配置(纯函数,不落盘,可单测)。
+/// 渲染所有需要的内核配置(纯函数,不落盘,可单测)。
+/// 内核启用 = 显式 cores 开关 OR 存在对应协议用户(自动启用)。
 pub fn plan(spec: &Spec) -> Result<Vec<Rendered>, Error> {
     let mut out = vec![];
-    if spec.cores.xray {
+    if spec.cores.xray || spec.needs_xray() {
         out.push(XrayCore.render(spec)?);
     }
-    if spec.cores.singbox {
+    if spec.cores.singbox || spec.needs_singbox() {
         out.push(SingboxCore.render(spec)?);
     }
     Ok(out)

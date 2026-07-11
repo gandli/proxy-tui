@@ -179,3 +179,112 @@ fn apply_writes_config_file() -> Result<(), Box<dyn std::error::Error>> {
         ));
     Ok(())
 }
+
+#[test]
+fn user_list_del_link_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = tempfile::tempdir()?;
+    let cfg = tmp.path().join("vagent").join("spec.toml");
+
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["init", "--domain", "v.example.com", "--config"])
+        .arg(&cfg)
+        .assert()
+        .success();
+
+    // 添加两个不同协议用户
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["user-add", "alice", "--config"])
+        .arg(&cfg)
+        .assert()
+        .success();
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args([
+            "user-add",
+            "bob",
+            "--protocol",
+            "hysteria2",
+            "--port",
+            "8443",
+            "--config",
+        ])
+        .arg(&cfg)
+        .assert()
+        .success();
+
+    // list 应含两者
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["user-list", "--config"])
+        .arg(&cfg)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("alice"))
+        .stdout(predicate::str::contains("bob"))
+        .stdout(predicate::str::contains("hysteria2"));
+
+    // link 生成 hysteria2:// 链接
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["user-link", "bob", "--config"])
+        .arg(&cfg)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("hysteria2://"));
+
+    // del 后 list 不再含 alice
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["user-del", "alice", "--config"])
+        .arg(&cfg)
+        .assert()
+        .success();
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["user-list", "--config"])
+        .arg(&cfg)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("alice").not());
+    Ok(())
+}
+
+#[test]
+fn apply_renders_singbox_when_hy2_user() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = tempfile::tempdir()?;
+    let cfg = tmp.path().join("vagent").join("spec.toml");
+
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["init", "--domain", "v.example.com", "--config"])
+        .arg(&cfg)
+        .assert()
+        .success();
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args([
+            "user-add",
+            "h",
+            "--protocol",
+            "tuic",
+            "--port",
+            "9443",
+            "--config",
+        ])
+        .arg(&cfg)
+        .assert()
+        .success();
+
+    // 加了 tuic 用户,apply --dry-run 应自动渲染 sing-box 配置
+    Command::cargo_bin("vagent")
+        .unwrap()
+        .args(["apply", "--dry-run", "--config"])
+        .arg(&cfg)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("singbox"))
+        .stdout(predicate::str::contains("tuic"));
+    Ok(())
+}

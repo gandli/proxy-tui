@@ -15,24 +15,57 @@ type HmacSha256 = Hmac<Sha256>;
 
 const SECRET_PATH: &str = "/etc/vagent/secret";
 
-/// 单用户 vless:// 链接(MVP 协议 VLESS+Reality)。
+/// 生成单用户分享链接(支持 VLESS+Reality / VMess / Trojan / Hysteria2 / Tuic)。
 pub fn gen_user(user: &User, spec: &Spec) -> Result<String, Error> {
-    if user.protocol != crate::spec::Protocol::Vless || !user.reality {
-        return Err(Error::Unsupported(format!(
-            "subscribe gen_user 仅支持 VLESS+Reality(MVP),got {:?}/reality={}",
-            user.protocol, user.reality
-        )));
-    }
-    let pbk = "<generated-by-xray>"; // 真实场景从 reality keys 读取
-    let sid = "";
-    let query = format!(
-        "type=tcp&security=reality&pbk={pbk}&sid={sid}&encryption=none&flow=xtls-rprx-vision"
-    );
-    let base = format!(
-        "vless://{}@{}:{}?{}#{}",
-        user.uuid, spec.domain, user.port, query, user.name
-    );
-    Ok(base)
+    use crate::spec::Protocol;
+    let d = &spec.domain;
+    let link = match &user.protocol {
+        Protocol::Vless if user.reality => {
+            let pbk = "<generated-by-xray>";
+            let query = "type=tcp&security=reality&pbk=".to_string()
+                + pbk
+                + "&sid=&encryption=none&flow=xtls-rprx-vision";
+            format!(
+                "vless://{}@{}:{}?{}#{}",
+                user.uuid, d, user.port, query, user.name
+            )
+        }
+        Protocol::Vmess => {
+            // vmess:// = Base64(JSON)
+            let cfg = serde_json::json!({
+                "v": "2", "ps": user.name, "add": d, "port": user.port.to_string(),
+                "id": user.uuid, "aid": "0", "net": "ws", "type": "none",
+                "host": d, "path": format!("/{}", user.id), "tls": ""
+            });
+            let json = serde_json::to_string(&cfg).map_err(|e| Error::Render(e.to_string()))?;
+            format!("vmess://{}", B64.encode(json))
+        }
+        Protocol::Trojan => {
+            format!(
+                "trojan://{}@{}:{}?security=tls#{}",
+                user.uuid, d, user.port, user.name
+            )
+        }
+        Protocol::Hysteria2 => {
+            format!(
+                "hysteria2://{}@{}:{}?sni={}#{}",
+                user.uuid, d, user.port, d, user.name
+            )
+        }
+        Protocol::Tuic => {
+            format!(
+                "tuic://{}:{}@{}:{}?congestion_control=bbr&alpn=h3&sni={}#{}",
+                user.uuid, user.uuid, d, user.port, d, user.name
+            )
+        }
+        other => {
+            return Err(Error::Unsupported(format!(
+                "subscribe gen_user 暂不支持协议 {other:?}(reality={})",
+                user.reality
+            )));
+        }
+    };
+    Ok(link)
 }
 
 /// 多用户 bundle(v2rayN 订阅):Base64(JSON{outbounds})。
@@ -115,10 +148,42 @@ mod tests {
     }
 
     #[test]
-    fn gen_user_rejects_non_reality() {
-        let spec = Spec::default_for("x.com");
-        let u = User::new("bob", crate::spec::Protocol::Vmess, 443, false);
-        assert!(gen_user(&u, &spec).is_err());
+    fn gen_user_vmess_link() {
+        let spec = Spec::default_for("v.example.com");
+        let u = User::new("bob", crate::spec::Protocol::Vmess, 2053, false);
+        let link = gen_user(&u, &spec).unwrap();
+        assert!(link.starts_with("vmess://"));
+        let decoded =
+            String::from_utf8(B64.decode(link.trim_start_matches("vmess://")).unwrap()).unwrap();
+        assert!(decoded.contains("bob"));
+        assert!(decoded.contains("2053"));
+    }
+
+    #[test]
+    fn gen_user_trojan_link() {
+        let spec = Spec::default_for("t.example.com");
+        let u = User::new("t", crate::spec::Protocol::Trojan, 443, false);
+        let link = gen_user(&u, &spec).unwrap();
+        assert!(link.starts_with("trojan://"));
+        assert!(link.contains("security=tls"));
+    }
+
+    #[test]
+    fn gen_user_hysteria2_link() {
+        let spec = Spec::default_for("h.example.com");
+        let u = User::new("h", crate::spec::Protocol::Hysteria2, 8443, false);
+        let link = gen_user(&u, &spec).unwrap();
+        assert!(link.starts_with("hysteria2://"));
+        assert!(link.contains("sni=h.example.com"));
+    }
+
+    #[test]
+    fn gen_user_tuic_link() {
+        let spec = Spec::default_for("u.example.com");
+        let u = User::new("u", crate::spec::Protocol::Tuic, 9443, false);
+        let link = gen_user(&u, &spec).unwrap();
+        assert!(link.starts_with("tuic://"));
+        assert!(link.contains("congestion_control=bbr"));
     }
 
     #[test]
