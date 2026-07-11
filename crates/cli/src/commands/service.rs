@@ -24,7 +24,11 @@ fn bin_path() -> String {
 pub fn show(core: &str, init: &str) -> anyhow::Result<()> {
     let init = InitSystem::from_str(init).map_err(|e| anyhow::anyhow!(e))?;
     let config = Spec::default_config_path();
-    let unit = systemd::unit_for(init, core, &bin_path(), &config.to_string_lossy());
+    let unit = if core == "api" {
+        systemd::api_unit(&bin_path(), &config.to_string_lossy())
+    } else {
+        systemd::unit_for(init, core, &bin_path(), &config.to_string_lossy())
+    };
     println!("{unit}");
     Ok(())
 }
@@ -33,12 +37,17 @@ pub fn show(core: &str, init: &str) -> anyhow::Result<()> {
 pub fn install(core: &str, init: &str) -> anyhow::Result<()> {
     let init = InitSystem::from_str(init).map_err(|e| anyhow::anyhow!(e))?;
     let config = Spec::default_config_path();
-    let unit = systemd::unit_for(init, core, &bin_path(), &config.to_string_lossy());
+    let unit = if core == "api" {
+        systemd::api_unit(&bin_path(), &config.to_string_lossy())
+    } else {
+        systemd::unit_for(init, core, &bin_path(), &config.to_string_lossy())
+    };
     let base = Spec::base_dir(&config);
-    systemd::install_unit(init, core, &unit, &base).map_err(|e| anyhow::anyhow!(e))?;
+    let svc_core = if core == "api" { "api" } else { core };
+    systemd::install_unit(init, svc_core, &unit, &base).map_err(|e| anyhow::anyhow!(e))?;
     println!(
         "已安装 {core} 单元 ({init:?}) → {}",
-        systemd::unit_install_path(init, core, &base).to_string_lossy()
+        systemd::unit_install_path(init, svc_core, &base).to_string_lossy()
     );
     Ok(())
 }
