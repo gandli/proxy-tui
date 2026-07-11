@@ -1,16 +1,16 @@
-use vagent_core::core::{ProxyCore, XrayCore};
+use vagent_core::core::{ProxyCore, SingboxCore, XrayCore};
 use vagent_core::executor::RealExecutor;
 
-/// 安装内核二进制(MVP 默认 Xray)。
-/// 经 RealExecutor 真下载;sha256 校验留待后续版本补全。
+/// 安装内核二进制。经 RealExecutor 真下载(三步走:下载→解压→放置)。
 pub fn run(core: &str, version: &str) -> anyhow::Result<()> {
     match core {
         "xray" => {
             XrayCore.install(version, &RealExecutor)?;
-            println!("xray v{version} 安装命令已执行");
+            println!("xray v{version} 安装完成(/usr/local/bin/xray 或 ~/.local/bin/xray)");
         }
         "singbox" => {
-            println!("singbox 安装将在 Phase 2 实现");
+            SingboxCore.install(version, &RealExecutor)?;
+            println!("sing-box v{version} 安装完成(/usr/local/bin 或 ~/.local/bin)");
         }
         other => {
             eprintln!("未知内核: {other}");
