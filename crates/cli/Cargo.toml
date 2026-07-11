@@ -1,0 +1,21 @@
+[package]
+name = "vagent"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+
+[[bin]]
+name = "vagent"
+path = "src/main.rs"
+
+[dependencies]
+vagent-core = { path = "../core" }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+toml.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
+insta.workspace = true

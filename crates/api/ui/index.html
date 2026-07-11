@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>vagent</title>
+<style>
+  :root { --bg:#020617; --panel:#0f172a; --line:#1e293b; --cyan:#22d3ee; --em:#34d399; --txt:#e2e8f0; --mut:#94a3b8; }
+  * { box-sizing: border-box; margin:0; padding:0; }
+  body { font-family: ui-monospace, "JetBrains Mono", monospace; background:var(--bg); color:var(--txt); padding:2rem; }
+  h1 { font-size:1.3rem; color:var(--cyan); margin-bottom:1rem; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:.75rem; padding:1.25rem; margin-bottom:1rem; }
+  .row { display:flex; gap:.5rem; align-items:center; margin-top:.75rem; flex-wrap:wrap; }
+  input { background:#0b1220; border:1px solid var(--line); color:var(--txt); padding:.5rem .6rem; border-radius:.5rem; font-family:inherit; }
+  button { background:var(--em); color:#02130c; border:none; padding:.5rem .9rem; border-radius:.5rem; font-weight:600; cursor:pointer; font-family:inherit; }
+  button:hover { filter:brightness(1.1); }
+  pre { background:#0b1220; border:1px solid var(--line); border-radius:.5rem; padding:.75rem; overflow:auto; font-size:.8rem; color:var(--mut); max-height:320px; }
+  .muted { color:var(--mut); font-size:.8rem; }
+  .ok { color:var(--em); }
+</style>
+</head>
+<body>
+  <h1>vagent · 本地管理面板</h1>
+
+  <div class="card">
+    <strong>状态</strong>
+    <div class="row"><button onclick="loadStatus()">刷新</button></div>
+    <pre id="status">加载中…</pre>
+  </div>
+
+  <div class="card">
+    <strong>Xray 配置 (VLESS+Reality)</strong>
+    <div class="row"><button onclick="loadRender()">刷新</button></div>
+    <pre id="render">加载中…</pre>
+  </div>
+
+  <div class="card">
+    <strong>新增用户 (VLESS+Reality)</strong>
+    <div class="row">
+      <input id="uname" placeholder="用户名" />
+      <input id="uport" placeholder="端口" value="443" />
+      <button onclick="addUser()">添加</button>
+      <span id="msg" class="muted"></span>
+    </div>
+  </div>
+
+  <p class="muted">仅监听 127.0.0.1,外部不可达。CLI 与 Telegram bot 共用同一 spec。</p>
+
+<script>
+  const BASE = "";
+  async function loadStatus() {
+    const r = await fetch(BASE + "/api/status");
+    const j = await r.json();
+    document.getElementById("status").textContent = JSON.stringify(j, null, 2);
+  }
+  async function loadRender() {
+    const r = await fetch(BASE + "/api/render");
+    const j = await r.json();
+    document.getElementById("render").textContent = JSON.stringify(j, null, 2);
+  }
+  async function addUser() {
+    const name = document.getElementById("uname").value.trim();
+    const port = parseInt(document.getElementById("uport").value, 10) || 443;
+    if (!name) { document.getElementById("msg").textContent = "请填用户名"; return; }
+    const r = await fetch(BASE + "/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, port })
+    });
+    const j = await r.json();
+    document.getElementById("msg").textContent = j.ok ? ("已添加 " + j.name) : "失败";
+    document.getElementById("msg").className = j.ok ? "ok" : "muted";
+    loadStatus();
+  }
+  loadStatus();
+  loadRender();
+</script>
+</body>
+</html>

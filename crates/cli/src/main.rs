@@ -1,0 +1,36 @@
+mod cli;
+mod commands;
+
+use clap::Parser;
+use cli::{Cli, Commands};
+use std::path::PathBuf;
+use vagent_core::Spec;
+
+fn default_config() -> PathBuf {
+    PathBuf::from("/etc/vagent/spec.toml")
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let config = cli
+        .config
+        .or_else(|| std::env::var("VAGENT_CONFIG").ok().map(PathBuf::from))
+        .unwrap_or_else(default_config);
+    match cli.command {
+        Commands::Init { domain, dry_run } => {
+            commands::init::run(domain.as_deref().unwrap_or("example.com"), &config, dry_run)?
+        }
+        Commands::Status => commands::status::run(&config)?,
+        Commands::Render => commands::render::run(&config)?,
+        Commands::Apply { dry_run } => commands::apply::run(&config, dry_run)?,
+        Commands::UserAdd { name, port } => commands::user::add(&config, &name, port)?,
+        Commands::CoreInstall { core, version } => commands::core_install::run(&core, &version)?,
+    }
+    Ok(())
+}
+
+// 确保 Spec 在二进制中可用(供未来命令直接构造)。
+#[allow(dead_code)]
+fn _spec_marker() -> Spec {
+    Spec::default_for("x")
+}

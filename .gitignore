@@ -1,0 +1,4 @@
+/target
+**/*.rs.bk
+*.snap.new
+# Cargo.lock 保留(应用二进制需可重现构建)

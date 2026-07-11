@@ -1,0 +1,13 @@
+[package]
+name = "vagent-bot"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+
+[dependencies]
+vagent-core = { path = "../core" }
+teloxide = { version = "0.13", features = ["macros", "webhooks"] }
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+tempfile.workspace = true
