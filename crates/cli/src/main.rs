@@ -47,6 +47,7 @@ fn main() -> anyhow::Result<()> {
             other => return Err(anyhow::anyhow!("未知 service 动作: {other}")),
         },
         Commands::RealityGen { name } => commands::reality::run(&config, name.as_deref())?,
+        Commands::RealityScan { public_ip } => commands::scan::run(&public_ip)?,
         Commands::Uninstall { purge } => commands::uninstall::run(purge)?,
     }
     Ok(())

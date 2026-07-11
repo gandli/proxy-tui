@@ -112,6 +112,11 @@ pub enum Commands {
         /// 用户名(不填则对所有 Reality 用户)
         name: Option<String>,
     },
+    /// 扫描可用 Reality SNI(RealiTLScanner)
+    RealityScan {
+        /// 公网 IP
+        public_ip: String,
+    },
     /// 卸载:停用并删除所有 vagent 服务
     Uninstall {
         /// 一并删除 /etc/vagent 配置目录

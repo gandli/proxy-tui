@@ -8,6 +8,7 @@ pub mod error;
 pub mod executor;
 pub mod exit;
 pub mod reality;
+pub mod reality_scan;
 pub mod render;
 pub mod routing;
 pub mod spec;
