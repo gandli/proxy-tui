@@ -4,16 +4,18 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "vagent", version, about = "Xray/sing-box 管理驱动 (spec 驱动)")]
 pub struct Cli {
-    /// 配置路径(默认 /etc/vagent/spec.toml)
+    /// 配置路径(默认 /etc/vagent/spec.toml 或 ~/.config/vagent/spec.toml)
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
 
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// 进入交互式菜单(不带任何参数直接运行 vagent 也会进入)
+    Menu,
     /// 初始化默认配置
     Init {
         /// 域名

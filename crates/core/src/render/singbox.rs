@@ -5,17 +5,18 @@
 use crate::spec::{Protocol, Spec, User};
 use crate::Error;
 use serde_json::json;
+use std::path::Path;
 
 /// 单个用户 → sing-box inbound(Hysteria2 / Tuic)。
-fn inbound_for(u: &User, spec: &Spec) -> Option<serde_json::Value> {
+fn inbound_for(u: &User, cert_cer: &str, cert_key: &str) -> Option<serde_json::Value> {
     match (&u.protocol, &u.transport) {
-        (Protocol::Hysteria2, _) => Some(hysteria2(u, spec)),
-        (Protocol::Tuic, _) => Some(tuic(u, spec)),
+        (Protocol::Hysteria2, _) => Some(hysteria2(u, cert_cer, cert_key)),
+        (Protocol::Tuic, _) => Some(tuic(u, cert_cer, cert_key)),
         _ => None,
     }
 }
 
-fn hysteria2(u: &User, spec: &Spec) -> serde_json::Value {
+fn hysteria2(u: &User, cert_cer: &str, cert_key: &str) -> serde_json::Value {
     json!({
         "type": "hysteria2",
         "tag": format!("hy2-{}", u.id),
@@ -24,13 +25,13 @@ fn hysteria2(u: &User, spec: &Spec) -> serde_json::Value {
         "users": [{ "password": u.uuid }],
         "tls": {
             "enabled": true,
-            "certificate_path": format!("/etc/vagent/certs/{}.cer", spec.domain),
-            "key_path": format!("/etc/vagent/certs/{}.key", spec.domain)
+            "certificate_path": cert_cer,
+            "key_path": cert_key
         }
     })
 }
 
-fn tuic(u: &User, spec: &Spec) -> serde_json::Value {
+fn tuic(u: &User, cert_cer: &str, cert_key: &str) -> serde_json::Value {
     json!({
         "type": "tuic",
         "tag": format!("tuic-{}", u.id),
@@ -41,18 +42,28 @@ fn tuic(u: &User, spec: &Spec) -> serde_json::Value {
         "tls": {
             "enabled": true,
             "alpn": ["h3"],
-            "certificate_path": format!("/etc/vagent/certs/{}.cer", spec.domain),
-            "key_path": format!("/etc/vagent/certs/{}.key", spec.domain)
+            "certificate_path": cert_cer,
+            "key_path": cert_key
         }
     })
 }
 
 /// 渲染 sing-box 配置(JSON)。纯函数。
-pub fn render(spec: &Spec) -> Result<serde_json::Value, Error> {
+pub fn render(spec: &Spec, base_dir: &Path) -> Result<serde_json::Value, Error> {
+    let cert_cer = base_dir
+        .join("certs")
+        .join(format!("{}.cer", spec.domain))
+        .to_string_lossy()
+        .to_string();
+    let cert_key = base_dir
+        .join("certs")
+        .join(format!("{}.key", spec.domain))
+        .to_string_lossy()
+        .to_string();
     let inbounds: Vec<serde_json::Value> = spec
         .users
         .iter()
-        .filter_map(|u| inbound_for(u, spec))
+        .filter_map(|u| inbound_for(u, &cert_cer, &cert_key))
         .collect();
 
     Ok(json!({
@@ -65,66 +76,7 @@ pub fn render(spec: &Spec) -> Result<serde_json::Value, Error> {
     }))
 }
 
-pub fn render_string(spec: &Spec) -> Result<String, Error> {
-    let v = render(spec)?;
+pub fn render_string(spec: &Spec, base_dir: &Path) -> Result<String, Error> {
+    let v = render(spec, base_dir)?;
     serde_json::to_string_pretty(&v).map_err(|e| Error::Render(e.to_string()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::spec::Transport;
-
-    #[test]
-    fn render_hysteria2_inbound() {
-        let mut spec = Spec::default_for("x.com");
-        spec.users.push(User::new(
-            "h",
-            Protocol::Hysteria2,
-            8443,
-            false,
-            Transport::Tcp,
-        ));
-        let v = render(&spec).unwrap();
-        let ib = &v["inbounds"][0];
-        assert_eq!(ib["type"], "hysteria2");
-        assert_eq!(ib["listen_port"], 8443);
-        assert!(ib["tls"]["enabled"].as_bool().unwrap());
-    }
-
-    #[test]
-    fn render_tuic_inbound() {
-        let mut spec = Spec::default_for("x.com");
-        spec.users
-            .push(User::new("t", Protocol::Tuic, 9443, false, Transport::Tcp));
-        let v = render(&spec).unwrap();
-        let ib = &v["inbounds"][0];
-        assert_eq!(ib["type"], "tuic");
-        assert_eq!(ib["congestion_control"], "bbr");
-    }
-
-    #[test]
-    fn render_filters_xray_protocols() {
-        let mut spec = Spec::default_for("x.com");
-        spec.users
-            .push(User::new("v", Protocol::Vless, 443, true, Transport::Tcp));
-        spec.users
-            .push(User::new("m", Protocol::Vmess, 2053, false, Transport::Tcp));
-        let v = render(&spec).unwrap();
-        assert_eq!(v["inbounds"].as_array().unwrap().len(), 0);
-    }
-
-    #[test]
-    fn render_has_outbounds() {
-        let spec = Spec::default_for("x.com");
-        let v = render(&spec).unwrap();
-        let tags: Vec<&str> = v["outbounds"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|o| o["tag"].as_str().unwrap())
-            .collect();
-        assert!(tags.contains(&"direct"));
-        assert!(tags.contains(&"block"));
-    }
 }

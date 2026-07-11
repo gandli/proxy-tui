@@ -1,18 +1,39 @@
 #!/usr/bin/env bash
 # vagent 一键安装脚本(对标 v2ray-agent install.sh 的体验)。
-# 用法:
-#   wget -P /root -N --no-check-certificate "https://raw.githubusercontent.com/gandli/proxy-tui/main/install.sh" && bash /root/install.sh
+# 用法(普通用户也行):
+#   wget -P ~ -N --no-check-certificate "https://raw.githubusercontent.com/gandli/proxy-tui/main/install.sh" && bash ~/install.sh
+#
+# 尽量不要求 root:
+#   - root 用户:装到 /usr/local/bin + /etc/vagent + systemd 单元
+#   - 普通用户:装到 ~/.local/bin + ~/.config/vagent,不碰 systemd(手动前台跑)
 #
 # 合规边界:仅用于授权测试环境 / 自建 VPS。
 set -euo pipefail
 
 REPO="gandli/proxy-tui"
-BIN_DIR="/usr/local/bin"
-SPEC_DIR="/etc/vagent"
-SERVICE_DIR="/etc/systemd/system"
 VERSION="${1:-latest}"
 
 echo "== vagent 安装器 =="
+
+# 按权限选安装根:root 走系统目录,普通用户走 HOME
+if [ "$(id -u)" = "0" ]; then
+  BIN_DIR="/usr/local/bin"
+  SPEC_DIR="/etc/vagent"
+  ROOT_INSTALL=1
+else
+  BIN_DIR="$HOME/.local/bin"
+  SPEC_DIR="$HOME/.config/vagent"
+  ROOT_INSTALL=0
+fi
+
+# 确保 bin 目录存在并加入 PATH(普通用户)
+mkdir -p "$BIN_DIR"
+if [ "$ROOT_INSTALL" = "0" ]; then
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *) export PATH="$BIN_DIR:$PATH" ;;
+  esac
+fi
 
 # 解析最新 release 版本(若未指定)
 if [ "$VERSION" = "latest" ]; then
@@ -34,20 +55,26 @@ else
   curl -sL -o "$BIN_DIR/vagent" "${BASE}/vagent" && chmod +x "$BIN_DIR/vagent"
   curl -sL -o "$BIN_DIR/vagent-api" "${BASE}/vagent-api" && chmod +x "$BIN_DIR/vagent-api"
 fi
-echo "二进制已安装: $(vagent --version 2>&1 | head -1)"
+echo "二进制已安装: $("$BIN_DIR/vagent" --version 2>&1 | head -1)"
 
 echo "== 初始化 spec =="
 mkdir -p "$SPEC_DIR"
-[ -f "$SPEC_DIR/spec.toml" ] || vagent init --domain "$(hostname -f 2>/dev/null || echo example.com)"
+[ -f "$SPEC_DIR/spec.toml" ] || "$BIN_DIR/vagent" init --domain "$(hostname -f 2>/dev/null || echo example.com)" --config "$SPEC_DIR/spec.toml"
 
-echo "== 安装 systemd 单元 =="
-vagent service install --core xray --init systemd || true
-vagent service install --core api --init systemd || true
+if [ "$ROOT_INSTALL" = "1" ]; then
+  echo "== 安装 systemd 单元 =="
+  "$BIN_DIR/vagent" service install --core xray --init systemd || true
+  "$BIN_DIR/vagent" service install --core api --init systemd || true
 
-echo "== 启动 =="
-systemctl daemon-reload 2>/dev/null || true
-systemctl enable vagent-xray 2>/dev/null || true
-systemctl start vagent-xray 2>/dev/null || true
+  echo "== 启动 =="
+  systemctl daemon-reload 2>/dev/null || true
+  systemctl enable vagent-xray 2>/dev/null || true
+  systemctl start vagent-xray 2>/dev/null || true
+else
+  echo "== 普通用户模式:跳过 systemd =="
+  echo "可手动前台运行(无 root 也能起 xray,superuser 仅 443/80 等 <1024 端口需要):"
+  echo "  vagent apply && vagent core start xray   # 用你自己的 xray 二进制"
+fi
 
 echo ""
 echo "== 安装完成 =="

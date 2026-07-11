@@ -8,8 +8,8 @@ use vagent_core::load_spec;
 pub fn run(config: &Path, core: &str, out: Option<&str>) -> anyhow::Result<()> {
     let spec = load_spec(config)?;
     let rendered = match core.to_lowercase().as_str() {
-        "xray" => XrayCore.render(&spec)?,
-        "singbox" => SingboxCore.render(&spec)?,
+        "xray" => XrayCore.render(&spec, config)?,
+        "singbox" => SingboxCore.render(&spec, config)?,
         other => return Err(anyhow::anyhow!("未知内核: {other}")),
     };
     if let Some(path) = out {

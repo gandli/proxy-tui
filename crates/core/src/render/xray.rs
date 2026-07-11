@@ -5,14 +5,15 @@
 
 use crate::spec::{Protocol, Spec, Transport, User};
 use crate::Error;
+use std::path::Path;
 
 /// 单个用户 → Xray inbound(仅 Xray 侧协议;其余返回 None)。
-fn inbound_for(u: &User, spec: &Spec) -> Option<serde_json::Value> {
+fn inbound_for(u: &User, spec: &Spec, cert_cer: &str, cert_key: &str) -> Option<serde_json::Value> {
     match (&u.protocol, u.reality, &u.transport) {
         (Protocol::Vless, true, transport) => Some(vless_reality(u, spec, transport)),
         (Protocol::Vless, false, transport) => Some(vless_plain(u, transport)),
         (Protocol::Vmess, _, _) => Some(vmess_ws(u)),
-        (Protocol::Trojan, _, transport) => Some(trojan_tls(u, spec, transport)),
+        (Protocol::Trojan, _, transport) => Some(trojan_tls(u, transport, cert_cer, cert_key)),
         // Hysteria2/Tuic/Naive 不在 Xray 侧渲染
         _ => None,
     }
@@ -96,13 +97,18 @@ fn vmess_ws(u: &User) -> serde_json::Value {
     })
 }
 
-fn trojan_tls(u: &User, spec: &Spec, transport: &Transport) -> serde_json::Value {
+fn trojan_tls(
+    u: &User,
+    transport: &Transport,
+    cert_cer: &str,
+    cert_key: &str,
+) -> serde_json::Value {
     let mut stream = stream_for(transport);
     stream["security"] = serde_json::json!("tls");
     stream["tlsSettings"] = serde_json::json!({
         "certificates": [{
-            "certificateFile": format!("/etc/vagent/certs/{}.cer", spec.domain),
-            "keyFile": format!("/etc/vagent/certs/{}.key", spec.domain)
+            "certificateFile": cert_cer,
+            "keyFile": cert_key
         }]
     });
     serde_json::json!({
@@ -118,11 +124,21 @@ fn trojan_tls(u: &User, spec: &Spec, transport: &Transport) -> serde_json::Value
 }
 
 /// 渲染 Xray-core 配置(JSON)。纯函数:输入 Spec,输出 Value,不触网不落盘。
-pub fn render(spec: &Spec) -> Result<serde_json::Value, Error> {
+pub fn render(spec: &Spec, base_dir: &Path) -> Result<serde_json::Value, Error> {
+    let cert_cer = base_dir
+        .join("certs")
+        .join(format!("{}.cer", spec.domain))
+        .to_string_lossy()
+        .to_string();
+    let cert_key = base_dir
+        .join("certs")
+        .join(format!("{}.key", spec.domain))
+        .to_string_lossy()
+        .to_string();
     let inbounds: Vec<serde_json::Value> = spec
         .users
         .iter()
-        .filter_map(|u| inbound_for(u, spec))
+        .filter_map(|u| inbound_for(u, spec, &cert_cer, &cert_key))
         .collect();
 
     let routing = spec.routing_json()?;
@@ -155,8 +171,8 @@ pub fn render(spec: &Spec) -> Result<serde_json::Value, Error> {
     }))
 }
 
-pub fn render_string(spec: &Spec) -> Result<String, Error> {
-    let v = render(spec)?;
+pub fn render_string(spec: &Spec, base_dir: &Path) -> Result<String, Error> {
+    let v = render(spec, base_dir)?;
     serde_json::to_string_pretty(&v).map_err(|e| Error::Render(e.to_string()))
 }
 
@@ -179,7 +195,7 @@ mod tests {
         )); // sing-box → out
         spec.users
             .push(User::new("c", Protocol::Tuic, 9443, false, Transport::Tcp)); // sing-box → out
-        let v = render(&spec).unwrap();
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         let inbounds = v["inbounds"].as_array().unwrap();
         assert_eq!(inbounds.len(), 1, "仅 Xray 侧协议应入站");
         assert_eq!(inbounds[0]["protocol"], "vless");
@@ -190,7 +206,7 @@ mod tests {
         let mut spec = Spec::default_for("x.com");
         spec.users
             .push(User::new("v", Protocol::Vmess, 2053, false, Transport::Tcp));
-        let v = render(&spec).unwrap();
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         let ib = &v["inbounds"][0];
         assert_eq!(ib["protocol"], "vmess");
         assert_eq!(ib["streamSettings"]["network"], "ws");
@@ -201,7 +217,7 @@ mod tests {
         let mut spec = Spec::default_for("x.com");
         spec.users
             .push(User::new("t", Protocol::Trojan, 443, false, Transport::Tcp));
-        let v = render(&spec).unwrap();
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         let ib = &v["inbounds"][0];
         assert_eq!(ib["protocol"], "trojan");
         assert_eq!(ib["streamSettings"]["security"], "tls");
@@ -210,7 +226,7 @@ mod tests {
     #[test]
     fn render_has_both_outbounds() {
         let spec = Spec::default_for("x.com");
-        let v = render(&spec).unwrap();
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         let tags: Vec<&str> = v["outbounds"]
             .as_array()
             .unwrap()
@@ -225,7 +241,7 @@ mod tests {
     fn render_includes_routing_with_rules() {
         let mut spec = Spec::default_for("x.com");
         spec.rules.block_bt = true;
-        let v = render(&spec).unwrap();
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         assert!(!v["routing"]["rules"].as_array().unwrap().is_empty());
         assert_eq!(v["routing"]["domainStrategy"], "IPIfNonMatch");
     }
@@ -235,7 +251,7 @@ mod tests {
         let mut spec = Spec::default_for("x.com");
         spec.users
             .push(User::new("a", Protocol::Vless, 443, true, Transport::Tcp));
-        let v = render(&spec).unwrap();
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         let ib = &v["inbounds"][0];
         assert_eq!(ib["streamSettings"]["security"], "reality");
         assert_eq!(ib["streamSettings"]["realitySettings"]["dest"], "x.com:443");
@@ -245,7 +261,7 @@ mod tests {
     fn render_adds_warp_outbound_when_needed() {
         let mut spec = Spec::default_for("x.com");
         spec.rules.warp_domains.push("netflix.com".into());
-        let v = render(&spec).unwrap();
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         let tags: Vec<&str> = v["outbounds"]
             .as_array()
             .unwrap()
@@ -265,7 +281,7 @@ mod tests {
     #[test]
     fn render_no_warp_outbound_by_default() {
         let spec = Spec::default_for("x.com");
-        let v = render(&spec).unwrap();
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         let tags: Vec<&str> = v["outbounds"]
             .as_array()
             .unwrap()

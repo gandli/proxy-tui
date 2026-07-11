@@ -3,21 +3,29 @@
 //! 命令拼装纯函数,经 Executor 执行。
 
 use crate::executor::{Cmd, Executor};
+use crate::spec::Spec;
 use crate::Error;
+use std::path::Path;
 
-pub const SCANNER_DIR: &str = "/etc/vagent/reality_scan";
-pub const SCANNER_BIN: &str = "/etc/vagent/reality_scan/RealiTLScanner-linux-64";
-
-/// 构造下载命令(GitHub release 的 linux-64 二进制)。
-pub fn download_cmd() -> Cmd {
+/// 构造下载命令(GitHub release 的 linux-64 二进制)。base_dir 推导落地目录(支持普通用户)。
+/// 构造下载命令(GitHub release 的 linux-64 二进制)。config 推导落地目录(支持普通用户)。
+pub fn download_cmd(config: &Path) -> Cmd {
+    let base_dir = Spec::base_dir(config);
+    let dir = base_dir.join("reality_scan").to_string_lossy().to_string();
     let url =
         "https://github.com/XTLS/RealiTLScanner/releases/download/latest/RealiTLScanner-linux-64";
-    Cmd::new("wget").args(["-c", "-q", "-P", SCANNER_DIR, url])
+    Cmd::new("wget").args(["-c", "-q", "-P", &dir, url])
 }
 
 /// 构造扫描命令(对公网 IP 扫 SNI)。
-pub fn scan_cmd(public_ip: &str) -> Cmd {
-    Cmd::new(SCANNER_BIN).args(["-addr", public_ip])
+pub fn scan_cmd(public_ip: &str, config: &Path) -> Cmd {
+    let base_dir = Spec::base_dir(config);
+    let bin = base_dir
+        .join("reality_scan")
+        .join("RealiTLScanner-linux-64")
+        .to_string_lossy()
+        .to_string();
+    Cmd::new(bin).args(["-addr", public_ip])
 }
 
 /// 解析扫描输出,提取可用 SNI(每行一个域名)。
@@ -31,8 +39,8 @@ pub fn parse_results(output: &str) -> Vec<String> {
 }
 
 /// 下载扫描器(经 Executor)。
-pub fn download(ex: &dyn Executor) -> Result<(), Error> {
-    let out = ex.run(&download_cmd())?;
+pub fn download(config: &Path, ex: &dyn Executor) -> Result<(), Error> {
+    let out = ex.run(&download_cmd(config))?;
     if out.ok() {
         Ok(())
     } else {
@@ -44,8 +52,8 @@ pub fn download(ex: &dyn Executor) -> Result<(), Error> {
 }
 
 /// 扫描可用 SNI(经 Executor),返回域名列表。
-pub fn scan(public_ip: &str, ex: &dyn Executor) -> Result<Vec<String>, Error> {
-    let out = ex.run(&scan_cmd(public_ip))?;
+pub fn scan(public_ip: &str, config: &Path, ex: &dyn Executor) -> Result<Vec<String>, Error> {
+    let out = ex.run(&scan_cmd(public_ip, config))?;
     if out.ok() {
         Ok(parse_results(&out.stdout))
     } else {
@@ -60,19 +68,20 @@ pub fn scan(public_ip: &str, ex: &dyn Executor) -> Result<Vec<String>, Error> {
 mod tests {
     use super::*;
     use crate::executor::{ExecOutput, FakeExecutor};
+    use std::path::Path;
 
     #[test]
     fn download_cmd_targets_release() {
-        let c = download_cmd();
+        let c = download_cmd(Path::new("/etc/vagent/spec.toml"));
         assert_eq!(c.program, "wget");
         let d = c.display();
         assert!(d.contains("RealiTLScanner-linux-64"));
-        assert!(d.contains(SCANNER_DIR));
+        assert!(d.contains("/etc/vagent/reality_scan"));
     }
 
     #[test]
     fn scan_cmd_passes_addr() {
-        let c = scan_cmd("1.2.3.4");
+        let c = scan_cmd("1.2.3.4", Path::new("/etc/vagent/spec.toml"));
         assert!(c.display().contains("-addr 1.2.3.4"));
     }
 
@@ -86,14 +95,16 @@ mod tests {
     #[test]
     fn download_failure_propagates() {
         let ex = FakeExecutor::new().expect("wget", ExecOutput::failure(1, "404"));
-        assert!(download(&ex).is_err());
+        assert!(download(Path::new("/etc/vagent/spec.toml"), &ex).is_err());
     }
 
     #[test]
     fn scan_via_executor_returns_domains() {
-        let ex =
-            FakeExecutor::new().expect(SCANNER_BIN, ExecOutput::success("www.x.com\napi.y.com\n"));
-        let r = scan("9.9.9.9", &ex).unwrap();
+        let ex = FakeExecutor::new().expect(
+            "/etc/vagent/reality_scan/RealiTLScanner-linux-64",
+            ExecOutput::success("www.x.com\napi.y.com\n"),
+        );
+        let r = scan("9.9.9.9", Path::new("/etc/vagent/spec.toml"), &ex).unwrap();
         assert_eq!(r, vec!["www.x.com", "api.y.com"]);
     }
 }
