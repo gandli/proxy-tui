@@ -84,8 +84,10 @@ jobs:
       - name: Render + validate sing-box config (tuic user)
         run: |
           ./target/release/vagent user-add t --protocol tuic --port 9443 --config /tmp/spec.toml
-          mkdir -p /etc/vagent/certs
-          openssl req -x509 -newkey rsa:2048 -nodes -keyout /etc/vagent/certs/example.com.key -out /etc/vagent/certs/example.com.cer -days 365 -subj "/CN=example.com"
+          # cert 目录跟随 spec 位置(普通用户可写,无需 /etc)
+          CERT_DIR="$(dirname /tmp/spec.toml)/certs"
+          mkdir -p "$CERT_DIR"
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout "$CERT_DIR/example.com.key" -out "$CERT_DIR/example.com.cer" -days 365 -subj "/CN=example.com"
           ./target/release/vagent render --core singbox --out /tmp/sb.json --config /tmp/spec.toml
           ./sing-box-bin check -c /tmp/sb.json && echo "SING-BOX CONFIG OK"
 
