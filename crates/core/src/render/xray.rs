@@ -18,6 +18,16 @@ fn inbound_for(u: &User, spec: &Spec) -> Option<serde_json::Value> {
 }
 
 fn vless_reality(u: &User, spec: &Spec) -> serde_json::Value {
+    let pbk = if u.reality_pbk.is_empty() {
+        "<generated-by-xray>".to_string()
+    } else {
+        u.reality_pbk.clone()
+    };
+    let sid = if u.reality_sid.is_empty() {
+        "".to_string()
+    } else {
+        u.reality_sid.clone()
+    };
     serde_json::json!({
         "listen": "0.0.0.0",
         "port": u.port,
@@ -32,8 +42,8 @@ fn vless_reality(u: &User, spec: &Spec) -> serde_json::Value {
             "realitySettings": {
                 "dest": format!("{}:443", spec.domain),
                 "serverNames": [spec.domain.clone()],
-                "privateKey": "<generated-by-xray>",
-                "shortIds": [""]
+                "privateKey": pbk,
+                "shortIds": [sid]
             }
         },
         "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }

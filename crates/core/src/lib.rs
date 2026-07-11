@@ -7,6 +7,7 @@ pub mod download;
 pub mod error;
 pub mod executor;
 pub mod exit;
+pub mod reality;
 pub mod render;
 pub mod routing;
 pub mod spec;

@@ -62,6 +62,12 @@ pub struct User {
     #[serde(default)]
     pub reality: bool,
     pub uuid: String,
+    /// Reality 公钥(客户端用)。由 xray x25519 生成,留空则渲染时占位。
+    #[serde(default)]
+    pub reality_pbk: String,
+    /// Reality shortId(客户端用,可选)。
+    #[serde(default)]
+    pub reality_sid: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -164,6 +170,8 @@ impl User {
             port,
             reality,
             uuid: Uuid::new_v4().to_string(),
+            reality_pbk: String::new(),
+            reality_sid: String::new(),
         }
     }
 }

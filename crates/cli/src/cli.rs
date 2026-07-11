@@ -93,6 +93,11 @@ pub enum Commands {
     },
     /// 续期所有 TLS 证书
     CertRenew,
+    /// 生成 Reality 密钥(xray x25519),写入 spec
+    RealityGen {
+        /// 用户名(不填则对所有 Reality 用户)
+        name: Option<String>,
+    },
     /// 卸载:停用并删除所有 vagent 服务
     Uninstall {
         /// 一并删除 /etc/vagent 配置目录
