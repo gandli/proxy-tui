@@ -68,6 +68,9 @@ pub struct User {
     /// Reality shortId(客户端用,可选)。
     #[serde(default)]
     pub reality_sid: String,
+    /// 传输层(默认 tcp)。
+    #[serde(default)]
+    pub transport: Transport,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -79,6 +82,42 @@ pub enum Protocol {
     Hysteria2,
     Tuic,
     Naive,
+}
+
+/// 传输层(决定 streamSettings.network / grpc / xhttp)。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Transport {
+    #[default]
+    Tcp,
+    Ws,
+    Grpc,
+    Xhttp,
+}
+
+impl std::str::FromStr for Transport {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "tcp" => Ok(Transport::Tcp),
+            "ws" | "websocket" => Ok(Transport::Ws),
+            "grpc" => Ok(Transport::Grpc),
+            "xhttp" => Ok(Transport::Xhttp),
+            other => Err(format!("未知传输: {other}")),
+        }
+    }
+}
+
+impl std::fmt::Display for Transport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Transport::Tcp => "tcp",
+            Transport::Ws => "ws",
+            Transport::Grpc => "grpc",
+            Transport::Xhttp => "xhttp",
+        };
+        f.write_str(s)
+    }
 }
 
 impl std::str::FromStr for Protocol {
@@ -133,7 +172,8 @@ impl Spec {
 
     /// 新增一个用户,自动生成 id / uuid。
     pub fn add_user(&mut self, name: &str, protocol: Protocol, port: u16, reality: bool) {
-        self.users.push(User::new(name, protocol, port, reality));
+        self.users
+            .push(User::new(name, protocol, port, reality, Transport::Tcp));
     }
 
     /// 按名字删除用户,返回删除的数量。
@@ -162,7 +202,13 @@ impl Spec {
 }
 
 impl User {
-    pub fn new(name: &str, protocol: Protocol, port: u16, reality: bool) -> Self {
+    pub fn new(
+        name: &str,
+        protocol: Protocol,
+        port: u16,
+        reality: bool,
+        transport: Transport,
+    ) -> Self {
         User {
             id: Uuid::new_v4().to_string(),
             name: name.to_string(),
@@ -172,6 +218,7 @@ impl User {
             uuid: Uuid::new_v4().to_string(),
             reality_pbk: String::new(),
             reality_sid: String::new(),
+            transport,
         }
     }
 }
@@ -191,8 +238,8 @@ mod tests {
 
     #[test]
     fn user_new_generates_unique_ids() {
-        let a = User::new("alice", Protocol::Vless, 443, true);
-        let b = User::new("bob", Protocol::Vless, 443, true);
+        let a = User::new("alice", Protocol::Vless, 443, true, Transport::Tcp);
+        let b = User::new("bob", Protocol::Vless, 443, true, Transport::Tcp);
         assert!(!a.uuid.is_empty());
         assert!(!b.uuid.is_empty());
         assert_ne!(a.id, b.id);

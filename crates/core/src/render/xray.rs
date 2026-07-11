@@ -3,21 +3,38 @@
 //! 支持:VLESS+Reality、VMess+WS、Trojan+TLS(Xray 侧协议)。
 //! Hysteria2 / Tuic 由 sing-box 渲染(见 render/singbox.rs)。
 
-use crate::spec::{Protocol, Spec, User};
+use crate::spec::{Protocol, Spec, Transport, User};
 use crate::Error;
 
 /// 单个用户 → Xray inbound(仅 Xray 侧协议;其余返回 None)。
 fn inbound_for(u: &User, spec: &Spec) -> Option<serde_json::Value> {
-    match u.protocol {
-        Protocol::Vless if u.reality => Some(vless_reality(u, spec)),
-        Protocol::Vmess => Some(vmess_ws(u)),
-        Protocol::Trojan => Some(trojan_tls(u, spec)),
-        // VLESS 非 reality、Hysteria2/Tuic/Naive 不在 Xray 侧渲染
+    match (&u.protocol, u.reality, &u.transport) {
+        (Protocol::Vless, true, transport) => Some(vless_reality(u, spec, transport)),
+        (Protocol::Vless, false, transport) => Some(vless_plain(u, transport)),
+        (Protocol::Vmess, _, _) => Some(vmess_ws(u)),
+        (Protocol::Trojan, _, transport) => Some(trojan_tls(u, spec, transport)),
+        // Hysteria2/Tuic/Naive 不在 Xray 侧渲染
         _ => None,
     }
 }
 
-fn vless_reality(u: &User, spec: &Spec) -> serde_json::Value {
+/// 生成 streamSettings(按传输层)。
+fn stream_for(transport: &Transport) -> serde_json::Value {
+    match transport {
+        Transport::Tcp => serde_json::json!({ "network": "tcp" }),
+        Transport::Ws => serde_json::json!({ "network": "ws", "wsSettings": { "path": "/ws" } }),
+        Transport::Grpc => serde_json::json!({
+            "network": "grpc",
+            "grpcSettings": { "serviceName": "vagent" }
+        }),
+        Transport::Xhttp => serde_json::json!({
+            "network": "xhttp",
+            "xhttpSettings": { "path": "/xhttp" }
+        }),
+    }
+}
+
+fn vless_reality(u: &User, spec: &Spec, transport: &Transport) -> serde_json::Value {
     let pbk = if u.reality_pbk.is_empty() {
         "<generated-by-xray>".to_string()
     } else {
@@ -28,6 +45,14 @@ fn vless_reality(u: &User, spec: &Spec) -> serde_json::Value {
     } else {
         u.reality_sid.clone()
     };
+    let mut stream = stream_for(transport);
+    stream["security"] = serde_json::json!("reality");
+    stream["realitySettings"] = serde_json::json!({
+        "dest": format!("{}:443", spec.domain),
+        "serverNames": [spec.domain.clone()],
+        "privateKey": pbk,
+        "shortIds": [sid]
+    });
     serde_json::json!({
         "listen": "0.0.0.0",
         "port": u.port,
@@ -36,16 +61,21 @@ fn vless_reality(u: &User, spec: &Spec) -> serde_json::Value {
             "clients": [{ "id": u.uuid, "flow": "xtls-rprx-vision", "level": 0 }],
             "decryption": "none"
         },
-        "streamSettings": {
-            "network": "tcp",
-            "security": "reality",
-            "realitySettings": {
-                "dest": format!("{}:443", spec.domain),
-                "serverNames": [spec.domain.clone()],
-                "privateKey": pbk,
-                "shortIds": [sid]
-            }
+        "streamSettings": stream,
+        "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
+    })
+}
+
+fn vless_plain(u: &User, transport: &Transport) -> serde_json::Value {
+    serde_json::json!({
+        "listen": "0.0.0.0",
+        "port": u.port,
+        "protocol": "vless",
+        "settings": {
+            "clients": [{ "id": u.uuid, "level": 0 }],
+            "decryption": "none"
         },
+        "streamSettings": stream_for(transport),
         "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
     })
 }
@@ -66,7 +96,15 @@ fn vmess_ws(u: &User) -> serde_json::Value {
     })
 }
 
-fn trojan_tls(u: &User, spec: &Spec) -> serde_json::Value {
+fn trojan_tls(u: &User, spec: &Spec, transport: &Transport) -> serde_json::Value {
+    let mut stream = stream_for(transport);
+    stream["security"] = serde_json::json!("tls");
+    stream["tlsSettings"] = serde_json::json!({
+        "certificates": [{
+            "certificateFile": format!("/etc/vagent/certs/{}.cer", spec.domain),
+            "keyFile": format!("/etc/vagent/certs/{}.key", spec.domain)
+        }]
+    });
     serde_json::json!({
         "listen": "0.0.0.0",
         "port": u.port,
@@ -74,16 +112,7 @@ fn trojan_tls(u: &User, spec: &Spec) -> serde_json::Value {
         "settings": {
             "clients": [{ "password": u.uuid, "level": 0 }]
         },
-        "streamSettings": {
-            "network": "tcp",
-            "security": "tls",
-            "tlsSettings": {
-                "certificates": [{
-                    "certificateFile": format!("/etc/vagent/certs/{}.cer", spec.domain),
-                    "keyFile": format!("/etc/vagent/certs/{}.key", spec.domain)
-                }]
-            }
-        },
+        "streamSettings": stream,
         "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
     })
 }
@@ -134,15 +163,22 @@ pub fn render_string(spec: &Spec) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec::{Protocol, Spec, User};
+    use crate::spec::{Protocol, Spec, Transport, User};
 
     #[test]
     fn render_filters_non_xray_protocols() {
         let mut spec = Spec::default_for("x.com");
-        spec.users.push(User::new("a", Protocol::Vless, 443, true)); // reality → in
         spec.users
-            .push(User::new("b", Protocol::Hysteria2, 8443, false)); // sing-box → out
-        spec.users.push(User::new("c", Protocol::Tuic, 9443, false)); // sing-box → out
+            .push(User::new("a", Protocol::Vless, 443, true, Transport::Tcp)); // reality → in
+        spec.users.push(User::new(
+            "b",
+            Protocol::Hysteria2,
+            8443,
+            false,
+            Transport::Tcp,
+        )); // sing-box → out
+        spec.users
+            .push(User::new("c", Protocol::Tuic, 9443, false, Transport::Tcp)); // sing-box → out
         let v = render(&spec).unwrap();
         let inbounds = v["inbounds"].as_array().unwrap();
         assert_eq!(inbounds.len(), 1, "仅 Xray 侧协议应入站");
@@ -153,7 +189,7 @@ mod tests {
     fn render_vmess_ws_inbound() {
         let mut spec = Spec::default_for("x.com");
         spec.users
-            .push(User::new("v", Protocol::Vmess, 2053, false));
+            .push(User::new("v", Protocol::Vmess, 2053, false, Transport::Tcp));
         let v = render(&spec).unwrap();
         let ib = &v["inbounds"][0];
         assert_eq!(ib["protocol"], "vmess");
@@ -164,7 +200,7 @@ mod tests {
     fn render_trojan_tls_inbound() {
         let mut spec = Spec::default_for("x.com");
         spec.users
-            .push(User::new("t", Protocol::Trojan, 443, false));
+            .push(User::new("t", Protocol::Trojan, 443, false, Transport::Tcp));
         let v = render(&spec).unwrap();
         let ib = &v["inbounds"][0];
         assert_eq!(ib["protocol"], "trojan");
@@ -197,7 +233,8 @@ mod tests {
     #[test]
     fn render_reality_fields_present() {
         let mut spec = Spec::default_for("x.com");
-        spec.users.push(User::new("a", Protocol::Vless, 443, true));
+        spec.users
+            .push(User::new("a", Protocol::Vless, 443, true, Transport::Tcp));
         let v = render(&spec).unwrap();
         let ib = &v["inbounds"][0];
         assert_eq!(ib["streamSettings"]["security"], "reality");

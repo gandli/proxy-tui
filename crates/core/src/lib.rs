@@ -17,7 +17,7 @@ pub mod tls;
 
 pub use core::plan;
 pub use error::Error;
-pub use spec::{Cores, Protocol, Spec, User};
+pub use spec::{Cores, Protocol, Spec, Transport, User};
 
 use std::path::Path;
 

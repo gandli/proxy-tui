@@ -6,11 +6,11 @@ use crate::spec::{Protocol, Spec, User};
 use crate::Error;
 use serde_json::json;
 
-/// 单个用户 → sing-box inbound(仅 sing-box 侧协议;其余返回 None)。
+/// 单个用户 → sing-box inbound(Hysteria2 / Tuic)。
 fn inbound_for(u: &User, spec: &Spec) -> Option<serde_json::Value> {
-    match u.protocol {
-        Protocol::Hysteria2 => Some(hysteria2(u, spec)),
-        Protocol::Tuic => Some(tuic(u, spec)),
+    match (&u.protocol, &u.transport) {
+        (Protocol::Hysteria2, _) => Some(hysteria2(u, spec)),
+        (Protocol::Tuic, _) => Some(tuic(u, spec)),
         _ => None,
     }
 }
@@ -73,13 +73,18 @@ pub fn render_string(spec: &Spec) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec::{Protocol, Spec, User};
+    use crate::spec::Transport;
 
     #[test]
     fn render_hysteria2_inbound() {
         let mut spec = Spec::default_for("x.com");
-        spec.users
-            .push(User::new("h", Protocol::Hysteria2, 8443, false));
+        spec.users.push(User::new(
+            "h",
+            Protocol::Hysteria2,
+            8443,
+            false,
+            Transport::Tcp,
+        ));
         let v = render(&spec).unwrap();
         let ib = &v["inbounds"][0];
         assert_eq!(ib["type"], "hysteria2");
@@ -90,7 +95,8 @@ mod tests {
     #[test]
     fn render_tuic_inbound() {
         let mut spec = Spec::default_for("x.com");
-        spec.users.push(User::new("t", Protocol::Tuic, 9443, false));
+        spec.users
+            .push(User::new("t", Protocol::Tuic, 9443, false, Transport::Tcp));
         let v = render(&spec).unwrap();
         let ib = &v["inbounds"][0];
         assert_eq!(ib["type"], "tuic");
@@ -100,9 +106,10 @@ mod tests {
     #[test]
     fn render_filters_xray_protocols() {
         let mut spec = Spec::default_for("x.com");
-        spec.users.push(User::new("v", Protocol::Vless, 443, true));
         spec.users
-            .push(User::new("m", Protocol::Vmess, 2053, false));
+            .push(User::new("v", Protocol::Vless, 443, true, Transport::Tcp));
+        spec.users
+            .push(User::new("m", Protocol::Vmess, 2053, false, Transport::Tcp));
         let v = render(&spec).unwrap();
         assert_eq!(v["inbounds"].as_array().unwrap().len(), 0);
     }

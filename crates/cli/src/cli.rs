@@ -43,6 +43,9 @@ pub enum Commands {
         /// 协议:vless/vmess/trojan/hysteria2/tuic/naive
         #[arg(long, default_value = "vless")]
         protocol: String,
+        /// 传输层:tcp/ws/grpc/xhttp(默认 tcp;reality 强制 tcp)
+        #[arg(long, default_value = "tcp")]
+        transport: String,
     },
     /// 列出所有用户
     UserList,
