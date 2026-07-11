@@ -2,6 +2,8 @@
 //! 支持 systemd(主流)与 openrc(Alpine)。真实 enable 在 VPS 上执行。
 
 use crate::Error;
+use std::path::{Path, PathBuf};
+use libc;
 
 /// init 系统类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +23,42 @@ impl std::str::FromStr for InitSystem {
     }
 }
 
+/// 单元安装路径(支持普通用户):
+/// - root:        /etc/systemd/system  或 /etc/init.d
+/// - 普通用户:    $HOME/.config/systemd/user  或 $HOME/.config/openrc
+///   (普通用户用 systemd --user,单元在 $HOME 下,而非 base 目录内)
+pub fn unit_install_path(init: InitSystem, core: &str, _base: &Path) -> PathBuf {
+    match init {
+        InitSystem::Systemd => {
+            if is_root() {
+                PathBuf::from(format!("/etc/systemd/system/{}.service", service_name(core)))
+            } else {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                PathBuf::from(home)
+                    .join(".config")
+                    .join("systemd")
+                    .join("user")
+                    .join(format!("{}.service", service_name(core)))
+            }
+        }
+        InitSystem::Openrc => {
+            if is_root() {
+                PathBuf::from(format!("/etc/init.d/{}", service_name(core)))
+            } else {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                PathBuf::from(home)
+                    .join(".config")
+                    .join("openrc")
+                    .join(service_name(core))
+            }
+        }
+    }
+}
+pub fn is_root() -> bool {
+    let uid = unsafe { libc::getuid() };
+    uid == 0
+}
+
 /// 生成指定内核的服务单元(按 init 系统分支)。
 pub fn unit_for(init: InitSystem, core: &str, binary_path: &str, config: &str) -> String {
     match init {
@@ -30,6 +68,8 @@ pub fn unit_for(init: InitSystem, core: &str, binary_path: &str, config: &str) -
 }
 
 fn systemd_unit(core: &str, binary_path: &str, config: &str) -> String {
+    // 普通用户模式(systemd --user):User 字段被忽略,用 %u 表示当前用户更贴切
+    let user_line = if is_root() { "User=root" } else { "User=%u" };
     format!(
         "[Unit]\n\
 Description=vagent {core} managed by vagent\n\
@@ -40,13 +80,14 @@ Type=simple\n\
 ExecStart={bin} apply --config {cfg}\n\
 Restart=on-failure\n\
 RestartSec=3\n\
-User=root\n\
+{user}\n\
 \n\
 [Install]\n\
 WantedBy=multi-user.target\n",
         core = core,
         bin = binary_path,
-        cfg = config
+        cfg = config,
+        user = user_line
     )
 }
 
@@ -96,33 +137,42 @@ WantedBy=multi-user.target\n",
     )
 }
 
-/// 写单元到对应系统目录(需 root,不在单测范围)。
-pub fn install_unit(init: InitSystem, core: &str, content: &str) -> Result<(), Error> {
-    let path = match init {
-        InitSystem::Systemd => format!("/etc/systemd/system/{}.service", service_name(core)),
-        InitSystem::Openrc => format!("/etc/init.d/{}", service_name(core)),
-    };
+/// 写单元到对应系统目录(root 用 /etc,普通用户用 base 下 .config)。
+/// 普通用户路径由 unit_install_path 推导(支持 systemd --user)。
+pub fn install_unit(init: InitSystem, core: &str, content: &str, base: &Path) -> Result<(), Error> {
+    let path = unit_install_path(init, core, base);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(&path, content)?;
     Ok(())
 }
 
 /// 卸载步骤:停用服务 → 禁用 → 删单元 → reload。返回命令列表(纯函数,可单测)。
-pub fn uninstall_cmds() -> Vec<crate::executor::Cmd> {
+/// base 用于推导单元路径(普通用户 ~/.config/systemd/user)。
+pub fn uninstall_cmds(base: &Path) -> Vec<crate::executor::Cmd> {
     use crate::executor::Cmd;
     let services = ["vagent-xray", "vagent-singbox", "vagent-api"];
     let mut cmds = vec![];
     for s in services {
         cmds.push(Cmd::new("systemctl").args(["stop", s]));
         cmds.push(Cmd::new("systemctl").args(["disable", s]));
-        cmds.push(Cmd::new("rm").args(["-f", &format!("/etc/systemd/system/{s}.service")]));
+        let unit = if is_root() {
+            format!("/etc/systemd/system/{s}.service")
+        } else {
+            unit_install_path(InitSystem::Systemd, s.trim_start_matches("vagent-"), base)
+                .to_string_lossy()
+                .to_string()
+        };
+        cmds.push(Cmd::new("rm").args(["-f", &unit]));
     }
     cmds.push(Cmd::new("systemctl").args(["daemon-reload"]));
     cmds
 }
 
 /// 执行卸载(经 Executor)。best-effort:单条失败不中断(服务可能本就不存在)。
-pub fn uninstall(ex: &dyn crate::executor::Executor) -> Result<(), Error> {
-    for c in uninstall_cmds() {
+pub fn uninstall(ex: &dyn crate::executor::Executor, base: &Path) -> Result<(), Error> {
+    for c in uninstall_cmds(base) {
         let _ = ex.run(&c); // best-effort
     }
     Ok(())
@@ -181,7 +231,8 @@ mod tests {
 
     #[test]
     fn uninstall_cmds_cover_all_services() {
-        let cmds = uninstall_cmds();
+        let base = Path::new("/etc/vagent");
+        let cmds = uninstall_cmds(base);
         let all = cmds
             .iter()
             .map(|c| c.display())
@@ -200,6 +251,20 @@ mod tests {
         let ex = FakeExecutor::new()
             .expect("systemctl", ExecOutput::failure(1, "not found"))
             .expect("rm", ExecOutput::failure(1, "no file"));
-        assert!(uninstall(&ex).is_ok());
+        assert!(uninstall(&ex, Path::new("/etc/vagent")).is_ok());
+    }
+
+    #[test]
+    fn unit_install_path_root_vs_user() {
+        let root_path = unit_install_path(InitSystem::Systemd, "xray", Path::new("/etc/vagent/spec.toml"));
+        // 普通用户路径必须在 $HOME/.config/systemd/user(而非 base 目录内)
+        assert!(root_path.to_string_lossy().contains(".config/systemd/user"));
+        // 不应出现双重 .config(旧 bug: base 内又拼 .config)
+        assert!(!root_path.to_string_lossy().contains("/.config/vagent/.config"));
+        if is_root() {
+            assert_eq!(root_path.to_string_lossy(), "/etc/systemd/system/vagent-xray.service");
+        } else {
+            assert!(root_path.to_string_lossy().ends_with("/.config/systemd/user/vagent-xray.service"));
+        }
     }
 }
