@@ -51,10 +51,19 @@ vagent user-add alice --protocol vless --port 443
 vagent user-list
 vagent user-link alice                     # 输出分享链接
 vagent user-del alice
+vagent user-add bob --protocol hysteria2 --port 8443 --transport tcp   # 指定协议/传输
+
+# Reality 密钥与 SNI
+vagent reality-gen                          # 用 xray x25519 为所有 Reality 用户生成真实密钥
+vagent reality-scan 1.2.3.4                 # 扫描公网 IP 可用 SNI(RealiTLScanner)
 
 # 内核生命周期
 vagent core start   --core xray            # start/stop/restart/enable/disable
 vagent core-install --core xray --version 1.8.0
+
+# 服务单元(systemd / openrc)
+vagent service show   --core xray --init systemd
+vagent service install --core xray --init openrc   # Alpine 用 openrc
 
 # 分流
 vagent route direct bank.com               # 强制直连白名单
