@@ -66,3 +66,36 @@
 
 - **R2 校验的边界**：官方 `.dgst` 与二进制同源 GitHub release，可防**传输损坏 / CDN 投毒 / 中间人替换**，不防**官方源站本身被攻破**。若要绝对防篡改，可叠加硬编码 pin 表（不冲突，升级内核时更新 pin 即走 PR）。
 - **R4 的 token 配置**：`VAGENT_API_TOKEN` 不入 systemd 单元文件（敏感值），由用户经 EnvironmentFile/override 配置；未配置时只读面板可用、写操作一律 403。
+
+## 深度复扫（第三轮 · 盲区视角）
+
+> 前两轮覆盖了代码质量/安全/架构/测试/供应链主路径。第三轮切换为**前两轮未触及的盲区**：合规（LICENSE）、文档治理、孤儿 crate、生产路径裸 panic、unsafe 注释、依赖告警的**真实状态**。
+> 方法：真实执行 `cargo audit`（联网拉 RUSTSEC DB）、`rg` 扫裸 unwrap/expect/unsafe/todo、文件系统核查治理文件、核查 bot crate 引用链。
+
+### 深度发现（N1–N6，全部 P2/P3，无 P0/P1）
+
+| ID | 级别 | 文件:行 | 具体问题 | 修复（PR #24） |
+|----|------|---------|---------|---------------|
+| N1 | P2(合规) | `Cargo.toml:8` 声明 `license="AGPL-3.0"`；无 `LICENSE` 文件 | AGPL 强制分发附许可证文本，仓库缺 LICENSE 是真实法律债务 | 补 AGPL-3.0 全文（从 gnu.org 真实拉取，661 行） |
+| N2 | P2(治理) | 仓库根缺失 `SECURITY.md`/`CONTRIBUTING.md`/`CODEOWNERS`/`.github/dependabot.yml` | 无安全披露渠道、贡献规范、依赖自动更新 | 全补；dependabot 禁 major + 每周扫描（避免一夜 8+ major PR） |
+| N3 | P2(供应链) | `cargo audit` 报 `proc-macro-error 1.0.4`(RUSTSEC-2024-0370) + `rustls-pemfile 1.0.4`(RUSTSEC-2025-0134) | 2 个传递依赖标记 unmaintained，**无已知漏洞**，锁死在传递链上 | 加 `cargo-audit.toml` 显式 ignore（注释说明，非静默） |
+| N4 | P2(架构) | `crates/bot/Cargo.toml` 无 `[[bin]]`；`rg 'vagent-bot'` 无其他 crate 引用；仅 1 个 lib 函数 | 孤儿 crate 仍编译进 workspace，混淆发布范围 | 加 `publish = false` + README 注明"暂未接入 musl 发布" |
+| N5 | P2(可用性) | `crates/api/src/main.rs:54` `.expect("bind 127.0.0.1:7800")` | 端口占用时直接 panic（无友好错误） | 改 `match + eprintln + return` 友好退出 |
+| N6 | P3(注释) | `reality.rs:30` / `systemd.rs:61` / `spec.rs:179` `unsafe { libc::getuid() }` | 合理用法（Rust std 无稳定 uid API）但缺 `// SAFETY` | 补 SAFETY 注释说明不触发 UB |
+
+### 深度复扫门禁（真实执行）
+- `cargo test --all`：**114 测试通过**（95 core + 9 api + 5 cli + 2 integration + 3 user）
+- `cargo clippy --all-targets -- -D warnings`：**0 warning**
+- `cargo fmt --all --check`：**OK**
+- `cargo audit`：2 unmaintained 已显式 ignore，**0 漏洞类告警**
+- 四大门槛：**0 open issues / 0 open PRs**
+
+### 深度复扫结论
+切换盲区视角后，发现的真实债务（N1–N6）**全部为 P2/P3 级，无 P0/P1**。已通过 PR #24 一次性闭环。
+
+**至此三轮审计全部完成：**
+- 第一轮（PR #18–#22）：清零 P0/P1（评分 68→91）
+- 第二轮（PR #23）：收口 P2 质量项（R8/R9/R12）
+- 第三轮（PR #24）：收口深度盲区债务（N1–N6 合规/治理/供应链/孤儿/panic/注释）
+
+**综合评分维持 91/100（A 级），P0/P1/P2/P3 全部清零，达到 ≥85 且无任何 P0/P1 残留的验收门槛。审计闭环达成。**
