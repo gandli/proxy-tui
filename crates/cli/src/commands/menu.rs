@@ -9,7 +9,7 @@ use std::path::Path;
 use dialoguer::{Confirm, Input, Select};
 
 use crate::commands;
-use vagent_core::{save_spec, Spec};
+use vagent_core::{load_spec, save_spec, Spec};
 
 // 测试输入注入:环境变量 VAGENT_TEST_INPUT(换行分隔)。
 // 每行依次是:数字=菜单选择索引,文本=Input/Confirm 的答案。
@@ -152,7 +152,7 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
         "Tuic 管理",
         "用户管理 (增删)",
         "证书管理",
-        "伪装站管理 (nginx SNI 反代)",
+        "nginx 管理 (装/nginx + 443 反代本机)",
         "分流规则 (路由/BT/黑名单)",
         "订阅管理",
         "内核管理 (xray / sing-box)",
@@ -199,10 +199,7 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
             Some(4) => proto_menu(config, "tuic")?,
             Some(5) => user_menu(config)?,
             Some(6) => cert_menu(config)?,
-            Some(7) => {
-                println!("== 伪装站管理 (nginx SNI 反代) ==");
-                commands::nginx::run(config)?;
-            }
+            Some(7) => nginx_menu(config)?,
             Some(8) => route_menu(config)?,
             Some(9) => subscribe_menu(config)?,
             Some(10) => core_menu(config)?,
@@ -404,6 +401,59 @@ fn cert_menu(config: &Path) -> anyhow::Result<()> {
             }
             Some(1) => commands::cert::renew()?,
             Some(2) | None => break,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// nginx 管理:装 nginx + 生成反代配置(占 443 反代本机 xray/sing-box)+ reload。
+/// root VPS 标准路径:nginx 以 root 持有 443,xray 绑高位端口(8443),由 nginx 反代进来。
+fn nginx_menu(config: &Path) -> anyhow::Result<()> {
+    loop {
+        println!();
+        let items = [
+            "安装 nginx (apt/apk)",
+            "生成反代配置 (443 → 本机 8443)",
+            "开启伪装站 SNI 反代",
+            "reload nginx",
+            "返回",
+        ];
+        match menu_select("nginx 管理", &items) {
+            Some(0) => commands::nginx_install::install()?,
+            Some(1) => {
+                // 开启反代本机并写配置
+                let mut spec = load_spec(config)?;
+                spec.nginx.reverse_proxy = true;
+                spec.nginx.reverse_port = 8443;
+                save_spec(&spec, config)?;
+                let cfg = vagent_core::render::nginx::render_all(&spec)?;
+                if cfg.is_empty() {
+                    println!("无需生成(nginx 未启用)");
+                } else {
+                    let out = config
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .join("nginx-reverse.conf");
+                    std::fs::write(&out, &cfg)?;
+                    println!("已写出 {}", out.display());
+                    println!("include 进 nginx 主配置后 reload(选项 3)");
+                }
+            }
+            Some(2) => {
+                let mut spec = load_spec(config)?;
+                spec.nginx.sni_proxy = true;
+                save_spec(&spec, config)?;
+                let cfg = vagent_core::render::nginx::render_all(&spec)?;
+                let out = config
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("nginx-reverse.conf");
+                std::fs::write(&out, &cfg)?;
+                println!("已写出 {} (含 SNI 伪装站)", out.display());
+            }
+            Some(3) => commands::nginx_install::reload()?,
+            Some(4) | None => break,
             _ => {}
         }
     }

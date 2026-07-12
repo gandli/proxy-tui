@@ -3,7 +3,7 @@ pub mod cert;
 pub mod core_ctl;
 pub mod core_install;
 pub mod menu;
-pub mod nginx;
+pub mod nginx_install;
 pub mod reality;
 pub mod route;
 pub mod scan;

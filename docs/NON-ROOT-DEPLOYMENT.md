@@ -100,4 +100,42 @@ fn acme_home() -> PathBuf {
 - 是否修 `ACME_HOME` 硬编码（P1）？
 - 是否在 README 补"非 root 部署指南"（setcap / nginx 反代 / systemd --user）？
 
-修代码均以 PR 提交，带单测，CI 绿后合入。业务逻辑不变，仅补齐 root-optional 范式。
+|修代码均以 PR 提交，带单测，CI 绿后合入。业务逻辑不变，仅补齐 root-optional 范式。
+
+---
+
+## 方案 1：root VPS 标准路径（已落地，PR #35）
+
+> 用户决策：VPS 通常就是 root 环境，v2ray-agent 本身就是 root 脚本。
+> 选 root 标准路径 —— vagent 自己装 nginx + 占 443 反代本机 xray:8443。
+
+### 新增能力
+| 文件 | 改动 |
+|------|------|
+| `crates/core/src/spec.rs` | 加 `NginxConfig { reverse_proxy, reverse_port(默认8443), sni_proxy }`；`Spec.nginx` 字段（默认空 = 不生成 nginx 配置） |
+| `crates/core/src/render/nginx.rs` | `render_sni()`（伪装站 SNI 反代外部站，既有用途）+ `render_reverse()`（443→127.0.0.1:reverse_port 反代本机）+ `render_all()` 按字段组合 |
+| `crates/cli/src/commands/nginx_install.rs`（新） | `install()` 装 nginx（apt/apk 按 os-release 检测）+ `reload()`（systemctl reload / nginx -s reload） |
+| `crates/cli/src/commands/menu.rs` | `7. nginx 管理` 子菜单：安装 nginx / 生成反代配置(443→8443) / 开启伪装站 SNI / reload |
+
+### 部署流程（root VPS）
+```
+vagent              # 首跑生成默认 spec
+# 菜单 7 → 0  装 nginx (apt/apk)
+# 菜单 7 → 1  生成 nginx-reverse.conf (listen 443 → 127.0.0.1:8443)
+# 菜单 6 → 0  签证书 (acme.sh, 已 root-optional)
+# include nginx-reverse.conf 进 /etc/nginx/nginx.conf 的 http 块
+# 菜单 7 → 3  reload nginx
+# 菜单 11     apply (xray 绑 8443, 由 nginx 反代进 443)
+```
+→ 对外标准 443（nginx 持有），xray/sing-box 绑 8443（非特权），Reality 伪装站 SNI 可选开启。
+
+### 测试
+- `render/nginx.rs`：`render_sni_contains_domain` / `render_reverse_forwards_to_local_port` / `render_all_empty_when_no_nginx` / `render_all_combines_reverse_and_sni`
+- `cli_integration.rs`：`menu_nginx_reverse_generates_443_to_local` / `menu_nginx_sni_proxy_generates_conf`（真实二进制驱动菜单 7）
+- `cargo test --all` 全绿；clippy 0；fmt OK
+
+### 与"完全非 root"的关系
+- 非 root 部署仍可用（PR #34 已修）：监听 8443 高位端口即零 root，无需 nginx。
+- 方案 1 是 **root VPS 的标准增强**：用 nginx 占 443 让对外端口标准化，且不要求 setcap。
+- 两种路径并存，由 spec.nginx 字段是否为空决定。
+
