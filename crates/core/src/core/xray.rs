@@ -40,12 +40,22 @@ impl ProxyCore for XrayCore {
         Cmd::new("systemctl").args(["restart", "vagent-xray"])
     }
 
-    /// 重写安装:下载 → 解压 → 放置(三步走 Executor)。
+    /// 重写安装:下载 → 校验完整性 → 解压 → 放置(四步走 Executor)。
     fn install(&self, version: &str, ex: &dyn Executor) -> Result<(), Error> {
         let out = ex.run(&self.install_cmd(version))?;
         if !out.ok() {
             return Err(Error::Render(format!(
                 "xray download failed: {}",
+                out.stderr
+            )));
+        }
+        // 完整性校验:拉官方 .dgst 提取 SHA2-256,与本地 zip sha256sum 比对,不符即中止。
+        let dgst_url = crate::download::xray_dgst_url(version);
+        let verify = crate::download::verify_cmd(&dgst_url, "/tmp/xray.zip");
+        let out = ex.run(&verify)?;
+        if !out.ok() {
+            return Err(Error::Render(format!(
+                "xray integrity verify failed: {}",
                 out.stderr
             )));
         }
@@ -113,16 +123,34 @@ mod tests {
     }
 
     #[test]
-    fn install_runs_three_steps_via_executor() {
+    fn install_runs_all_steps_via_executor() {
         let ex = FakeExecutor::new()
             .expect("curl", ExecOutput::success(""))
             .expect("unzip", ExecOutput::success(""))
-            .expect("sh", ExecOutput::success(""));
+            .expect("sh", ExecOutput::success("sha256 verified: abc"));
         assert!(XrayCore.install("1.8.23", &ex).is_ok());
         let h = crate::executor::take_history();
         assert!(h.iter().any(|c| c.program == "curl"));
+        // 校验步骤:sh -c 含 sha256sum
+        assert!(h
+            .iter()
+            .any(|c| c.program == "sh" && c.display().contains("sha256sum")));
         assert!(h.iter().any(|c| c.program == "unzip"));
-        assert!(h.iter().any(|c| c.program == "sh"));
+    }
+
+    #[test]
+    fn install_aborts_on_integrity_mismatch() {
+        // 下载成功但校验(sh)失败 → install 应中止报错,不解压
+        let ex = FakeExecutor::new()
+            .expect("curl", ExecOutput::success(""))
+            .expect("sh", ExecOutput::failure(1, "sha256 mismatch"));
+        let r = XrayCore.install("1.8.23", &ex);
+        assert!(r.is_err(), "校验失败应中止安装");
+        let msg = format!("{:?}", r.unwrap_err());
+        assert!(
+            msg.contains("verify") || msg.contains("mismatch"),
+            "错误应指向校验: {msg}"
+        );
     }
     #[test]
     fn reload_via_executor() {
