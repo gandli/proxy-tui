@@ -146,18 +146,20 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
         } else {
             "安装"
         },
-        "一键 Reality(无域名)",
+        "一键 Reality (无域名,自动生成)",
         "Hysteria2 管理",
-        "REALITY 管理",
+        "REALITY 管理 (密钥/扫描SNI)",
         "Tuic 管理",
-        "用户管理",
+        "用户管理 (增删)",
         "证书管理",
-        "分流规则",
+        "伪装站管理 (nginx SNI 反代)",
+        "分流规则 (路由/BT/黑名单)",
         "订阅管理",
         "内核管理 (xray / sing-box)",
         "应用配置 (apply)",
         "查看状态",
         "卸载",
+        "更新提示 (cargo install vagent)",
         "退出",
     ];
 
@@ -174,19 +176,21 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
         println!("6. {}", items[6]);
         println!("7. {}", items[7]);
         println!("8. {}", items[8]);
-        println!("------------------------- 内核管理 -----------------------------");
         println!("9. {}", items[9]);
+        println!("------------------------- 脚本管理 -----------------------------");
         println!("10. {}", items[10]);
         println!("11. {}", items[11]);
-        println!("------------------------- 脚本管理 -----------------------------");
         println!("12. {}", items[12]);
         println!("13. {}", items[13]);
+        println!("14. {}", items[14]);
+        println!("15. {}", items[15]);
         println!("==============================================================");
 
         match menu_select("vagent 管理菜单", &items) {
             Some(0) => {
                 // 安装 / 重新安装:装 xray + 应用
-                commands::core_install::run("xray", "1.8.23")?;
+                let ver = prompt_text("Xray 版本(不含 v)", "1.8.23");
+                commands::core_install::run("xray", &ver)?;
                 commands::apply::run(config, false)?;
             }
             Some(1) => reality_oneclick(config)?,
@@ -195,20 +199,30 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
             Some(4) => proto_menu(config, "tuic")?,
             Some(5) => user_menu(config)?,
             Some(6) => cert_menu(config)?,
-            Some(7) => route_menu(config)?,
-            Some(8) => subscribe_menu(config)?,
-            Some(9) => core_menu(config)?,
-            Some(10) => {
+            Some(7) => {
+                println!("== 伪装站管理 (nginx SNI 反代) ==");
+                commands::nginx::run(config)?;
+            }
+            Some(8) => route_menu(config)?,
+            Some(9) => subscribe_menu(config)?,
+            Some(10) => core_menu(config)?,
+            Some(11) => {
                 println!("== 应用配置 ==");
                 commands::apply::run(config, false)?;
             }
-            Some(11) => commands::status::run(config)?,
-            Some(12) => {
+            Some(12) => commands::status::run(config)?,
+            Some(13) => {
                 println!("== 卸载 ==");
                 let purge = menu_confirm("同时删除配置目录?", false);
                 commands::uninstall::run(purge)?;
             }
-            Some(13) | None => {
+            Some(14) => {
+                println!("== 更新提示 ==");
+                println!("vagent 以 Cargo 二进制分发。更新方式:");
+                println!("  cargo install vagent --force");
+                println!("或从仓库 Releases 下载最新单文件二进制覆盖安装。");
+            }
+            Some(15) | None => {
                 println!("再见。");
                 break;
             }

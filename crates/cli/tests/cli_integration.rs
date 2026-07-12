@@ -9,9 +9,9 @@ use assert_cmd::Command;
 use tempfile::tempdir;
 
 /// 构造菜单输入序列(每行一次消费)。
-/// 主菜单索引(对齐 v2ray-agent,0 基):
-/// 0安装 1一键Reality 2Hysteria2 3REALITY 4Tuic 5用户 6证书 7分流 8订阅
-/// 9内核 10应用 11状态 12卸载 13退出
+/// 主菜单索引(0 基,对齐 v2ray-agent):
+/// 0安装 1一键Reality 2Hysteria2 3REALITY 4Tuic 5用户 6证书 7伪装站 8分流
+/// 9订阅 10内核 11应用 12状态 13卸载 14更新提示 15退出
 /// 用户子菜单: 0新增 1列出 2删除 3链接 4返回
 /// 订阅子菜单: 0生成 1签名 2返回
 const FLOW_ADD_USER_AND_SUBSCRIBE: &str = "\
@@ -21,10 +21,10 @@ alice
 8443
 0
 4
-8
+9
 0
 2
-13
+15
 ";
 
 #[test]
@@ -47,6 +47,32 @@ fn menu_flow_adds_user_and_generates_subscribe() {
     // 订阅菜单进出:普通 vless 用户无 Reality,bundle 无内容会打印提示但菜单不崩溃。
     // bundle 的正/负路径由 core::subscribe 单测覆盖,此处只验证交互不崩溃。
     let _ = String::from_utf8_lossy(&output.stdout);
+}
+
+#[test]
+fn menu_nginx_entry_generates_sni_proxy_conf() {
+    // 对齐审计 P1-A:验证『7. 伪装站管理』菜单项能调通 nginx 命令并产出配置
+    let tmp = tempdir().unwrap();
+    let cfg = tmp.path().join("vagent").join("spec.toml");
+
+    // 7 = 伪装站管理;随后 15 = 退出
+    let flow = "7\n15\n";
+    let mut cmd = Command::cargo_bin("vagent").unwrap();
+    let output = cmd
+        .env("HOME", tmp.path())
+        .env("VAGENT_CONFIG", &cfg)
+        .env("VAGENT_TEST_INPUT", flow)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "伪装站菜单项不应崩溃");
+
+    // nginx 命令应将 SNI 反代配置写到 spec 同目录
+    let proxy = tmp.path().join("vagent").join("nginx-sni-proxy.conf");
+    assert!(
+        proxy.exists(),
+        "伪装站管理应生成 nginx-sni-proxy.conf: {}",
+        proxy.display()
+    );
 }
 
 #[test]
