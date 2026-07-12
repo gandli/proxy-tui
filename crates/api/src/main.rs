@@ -162,8 +162,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_status_allowed_without_token() {
-        let app = router(state_with(None));
+    async fn get_status_allowed_with_valid_token() {
+        let app = router(state_with(Some("tok")));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/status")
+                    .header("authorization", "Bearer tok")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn get_status_without_token_when_configured_is_401() {
+        // token 已配置但请求不带 → 401(读操作也不放行)
+        let app = router(state_with(Some("tok")));
         let resp = app
             .oneshot(
                 Request::builder()
@@ -173,7 +190,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

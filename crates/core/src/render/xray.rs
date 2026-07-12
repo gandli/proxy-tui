@@ -8,14 +8,20 @@ use crate::Error;
 use std::path::Path;
 
 /// 单个用户 → Xray inbound(仅 Xray 侧协议;其余返回 None)。
-fn inbound_for(u: &User, spec: &Spec, cert_cer: &str, cert_key: &str) -> Option<serde_json::Value> {
+/// 返回 Result:reality 用户缺密钥时 Err(占位符改报错)。
+fn inbound_for(
+    u: &User,
+    spec: &Spec,
+    cert_cer: &str,
+    cert_key: &str,
+) -> Result<Option<serde_json::Value>, Error> {
     match (&u.protocol, u.reality, &u.transport) {
-        (Protocol::Vless, true, transport) => Some(vless_reality(u, spec, transport)),
-        (Protocol::Vless, false, transport) => Some(vless_plain(u, transport)),
-        (Protocol::Vmess, _, _) => Some(vmess_ws(u)),
-        (Protocol::Trojan, _, transport) => Some(trojan_tls(u, transport, cert_cer, cert_key)),
+        (Protocol::Vless, true, transport) => Ok(Some(vless_reality(u, spec, transport)?)),
+        (Protocol::Vless, false, transport) => Ok(Some(vless_plain(u, transport))),
+        (Protocol::Vmess, _, _) => Ok(Some(vmess_ws(u))),
+        (Protocol::Trojan, _, transport) => Ok(Some(trojan_tls(u, transport, cert_cer, cert_key))),
         // Hysteria2/Tuic/Naive 不在 Xray 侧渲染
-        _ => None,
+        _ => Ok(None),
     }
 }
 
@@ -35,12 +41,15 @@ fn stream_for(transport: &Transport) -> serde_json::Value {
     }
 }
 
-fn vless_reality(u: &User, spec: &Spec, transport: &Transport) -> serde_json::Value {
-    let pbk = if u.reality_pbk.is_empty() {
-        "<generated-by-xray>".to_string()
-    } else {
-        u.reality_pbk.clone()
-    };
+fn vless_reality(u: &User, spec: &Spec, transport: &Transport) -> Result<serde_json::Value, Error> {
+    // reality 用户必须有真实公钥,缺失则报错而非发射 <generated-by-xray> 占位符
+    if u.reality_pbk.is_empty() {
+        return Err(Error::Render(format!(
+            "用户 {} 是 Reality 用户但未生成密钥(reality_pbk 为空),无法渲染配置",
+            u.name
+        )));
+    }
+    let pbk = u.reality_pbk.clone();
     let sid = if u.reality_sid.is_empty() {
         "".to_string()
     } else {
@@ -54,7 +63,7 @@ fn vless_reality(u: &User, spec: &Spec, transport: &Transport) -> serde_json::Va
         "privateKey": pbk,
         "shortIds": [sid]
     });
-    serde_json::json!({
+    Ok(serde_json::json!({
         "listen": "0.0.0.0",
         "port": u.port,
         "protocol": "vless",
@@ -64,7 +73,7 @@ fn vless_reality(u: &User, spec: &Spec, transport: &Transport) -> serde_json::Va
         },
         "streamSettings": stream,
         "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
-    })
+    }))
 }
 
 fn vless_plain(u: &User, transport: &Transport) -> serde_json::Value {
@@ -138,7 +147,10 @@ pub fn render(spec: &Spec, base_dir: &Path) -> Result<serde_json::Value, Error> 
     let inbounds: Vec<serde_json::Value> = spec
         .users
         .iter()
-        .filter_map(|u| inbound_for(u, spec, &cert_cer, &cert_key))
+        .map(|u| inbound_for(u, spec, &cert_cer, &cert_key))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
         .collect();
 
     let routing = spec.routing_json()?;
@@ -184,8 +196,12 @@ mod tests {
     #[test]
     fn render_filters_non_xray_protocols() {
         let mut spec = Spec::default_for("x.com");
-        spec.users
-            .push(User::new("a", Protocol::Vless, 443, true, Transport::Tcp)); // reality → in
+        {
+            let mut a = User::new("a", Protocol::Vless, 443, true, Transport::Tcp);
+            a.reality_pbk = "abc123pubkey".to_string();
+            a.reality_sid = "abcd1234".to_string();
+            spec.users.push(a); // reality → in
+        }
         spec.users.push(User::new(
             "b",
             Protocol::Hysteria2,
@@ -249,8 +265,12 @@ mod tests {
     #[test]
     fn render_reality_fields_present() {
         let mut spec = Spec::default_for("x.com");
-        spec.users
-            .push(User::new("a", Protocol::Vless, 443, true, Transport::Tcp));
+        {
+            let mut a = User::new("a", Protocol::Vless, 443, true, Transport::Tcp);
+            a.reality_pbk = "abc123pubkey".to_string();
+            a.reality_sid = "abcd1234".to_string();
+            spec.users.push(a);
+        }
         let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
         let ib = &v["inbounds"][0];
         assert_eq!(ib["streamSettings"]["security"], "reality");
@@ -289,5 +309,17 @@ mod tests {
             .map(|o| o["tag"].as_str().unwrap())
             .collect();
         assert!(!tags.contains(&"warp"));
+    }
+
+    #[test]
+    fn render_reality_without_pbk_errors() {
+        // R5 闭环:reality 用户缺公钥不得发射 <generated-by-xray> 占位符,应报错
+        let mut spec = Spec::default_for("x.com");
+        spec.users
+            .push(User::new("a", Protocol::Vless, 443, true, Transport::Tcp));
+        let r = render(&spec, Path::new("/etc/vagent/spec.toml"));
+        assert!(r.is_err(), "缺密钥的 reality 用户渲染应失败");
+        let msg = format!("{}", r.unwrap_err());
+        assert!(!msg.contains("<generated-by-xray>"), "不应含占位符: {msg}");
     }
 }
