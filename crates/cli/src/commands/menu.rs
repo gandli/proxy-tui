@@ -32,6 +32,8 @@ fn next_test_line() -> Option<String> {
 }
 
 /// 菜单单选:优先消费测试输入(数字索引或匹配文本),否则走 dialoguer。
+/// 非交互模式(VAGENT_TEST_INPUT 已设置但输入耗尽)返回 None,由菜单循环退出,
+/// 避免 assert_cmd/管道下 dialoguer 误选默认项。
 fn menu_select(prompt: &str, items: &[&str]) -> Option<usize> {
     if let Some(line) = next_test_line() {
         let line = line.trim();
@@ -42,6 +44,10 @@ fn menu_select(prompt: &str, items: &[&str]) -> Option<usize> {
             return None;
         }
         return items.iter().position(|i| *i == line);
+    }
+    // 非交互模式:VAGENT_TEST_INPUT 存在但输入已耗尽 → 优雅退出。
+    if std::env::var("VAGENT_TEST_INPUT").is_ok() {
+        return None;
     }
     Select::new()
         .with_prompt(prompt)
