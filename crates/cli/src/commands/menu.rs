@@ -6,10 +6,10 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::Path;
 
-use dialoguer::{Confirm, Input, Select};
+use dialoguer::{Confirm, Input, MultiSelect, Select};
 
 use crate::commands;
-use vagent_core::{load_spec, save_spec, Spec};
+use vagent_core::{load_spec, save_spec, Protocol, Spec};
 
 // 测试输入注入:环境变量 VAGENT_TEST_INPUT(换行分隔)。
 // 每行依次是:数字=菜单选择索引,文本=Input/Confirm 的答案。
@@ -73,6 +73,34 @@ fn menu_confirm(prompt: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
+/// 多选协议组合:优先消费测试输入(一行,逗号/空格分隔的索引;
+/// `ALL`=全选,`NONE`/空=不选),否则走 dialoguer MultiSelect。
+/// 返回选中的索引列表。用于安装时"多选协议组合"(对齐 v2ray-agent 任意组合安装)。
+fn multi_select(prompt: &str, items: &[&str]) -> Vec<usize> {
+    if let Some(line) = next_test_line() {
+        let line = line.trim();
+        if line.eq_ignore_ascii_case("ALL") {
+            return (0..items.len()).collect();
+        }
+        if line.is_empty() || line.eq_ignore_ascii_case("NONE") {
+            return vec![];
+        }
+        return line
+            .split([',', ' ', '\t'])
+            .filter_map(|s| s.trim().parse::<usize>().ok())
+            .filter(|i| *i < items.len())
+            .collect();
+    }
+    if std::env::var("VAGENT_TEST_INPUT").is_ok() {
+        return vec![]; // 非交互且未给多选输入 → 空选
+    }
+    MultiSelect::new()
+        .with_prompt(prompt)
+        .items(items)
+        .interact()
+        .unwrap_or_default()
+}
+
 fn prompt_text(msg: &str, default: &str) -> String {
     if let Some(line) = next_test_line() {
         if line.trim().is_empty() {
@@ -127,7 +155,34 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
         } else {
             prompt_text("请输入域名(如 example.com)", "example.com")
         };
-        let spec = Spec::default_for(&domain);
+        // 安装时多选协议组合(对齐 v2ray-agent 任意组合安装):
+        // 用多选索引映射到协议,生成含默认用户的 spec。
+        let proto_items = [
+            "VLESS (TCP)",
+            "VMESS (WS)",
+            "Trojan (TLS)",
+            "Hysteria2",
+            "Tuic",
+            "Naive (sing-box)",
+        ];
+        let chosen = multi_select("选择要启用的协议组合(空格多选,回车确认)", &proto_items);
+        let protocols: Vec<Protocol> = chosen
+            .iter()
+            .filter_map(|i| match i {
+                0 => Some(Protocol::Vless),
+                1 => Some(Protocol::Vmess),
+                2 => Some(Protocol::Trojan),
+                3 => Some(Protocol::Hysteria2),
+                4 => Some(Protocol::Tuic),
+                5 => Some(Protocol::Naive),
+                _ => None,
+            })
+            .collect();
+        let spec = if protocols.is_empty() {
+            Spec::default_for(&domain)
+        } else {
+            Spec::default_for_protocols(&domain, &protocols)
+        };
         if let Some(parent) = config.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -188,9 +243,45 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
 
         match menu_select("vagent 管理菜单", &items) {
             Some(0) => {
-                // 安装 / 重新安装:装 xray + 应用
-                let ver = prompt_text("Xray 版本(不含 v)", "1.8.23");
-                commands::core_install::run("xray", &ver)?;
+                // 安装 / 重新安装:多选协议组合 → 重建 spec → 装对应内核 → apply
+                let current = load_spec(config)?;
+                let proto_items = [
+                    "VLESS (TCP)",
+                    "VMESS (WS)",
+                    "Trojan (TLS)",
+                    "Hysteria2",
+                    "Tuic",
+                    "Naive (sing-box)",
+                ];
+                let chosen = multi_select("选择要启用的协议组合(空格多选,回车确认)", &proto_items);
+                let protocols: Vec<Protocol> = chosen
+                    .iter()
+                    .filter_map(|i| match i {
+                        0 => Some(Protocol::Vless),
+                        1 => Some(Protocol::Vmess),
+                        2 => Some(Protocol::Trojan),
+                        3 => Some(Protocol::Hysteria2),
+                        4 => Some(Protocol::Tuic),
+                        _ => None,
+                    })
+                    .collect();
+                let spec = if protocols.is_empty() {
+                    Spec::default_for(&current.domain)
+                } else {
+                    Spec::default_for_protocols(&current.domain, &protocols)
+                };
+                save_spec(&spec, config)?;
+                // 装选中的内核
+                if spec.cores.xray {
+                    let ver = prompt_text("Xray 版本(不含 v)", "1.8.23");
+                    commands::core_install::run("xray", &ver)?;
+                    commands::service::install("xray", "systemd")?;
+                }
+                if spec.cores.singbox {
+                    let ver = prompt_text("Sing-box 版本(不含 v)", "1.10.0");
+                    commands::core_install::run("singbox", &ver)?;
+                    commands::service::install("singbox", "systemd")?;
+                }
                 commands::apply::run(config, false)?;
             }
             Some(1) => reality_oneclick(config)?,
