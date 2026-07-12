@@ -93,28 +93,41 @@ spec.toml ──┬─→ render/xray    → <base>/cores/xray/config.json
 
 ## 命令
 
-`vagent` 不接受任何子命令参数。直接运行即进入交互式管理菜单,所有操作(用户、内核、分流、证书、Reality、订阅、服务、状态、卸载)都在菜单内点选/输入完成:
+`vagent` **零命令行参数**。直接运行即进入交互式管理菜单(结构对齐 mack-a/v2ray-agent 的菜单布局),所有操作在菜单内点选/输入完成:
 
 ```bash
-vagent                 # 进入管理菜单(可选 --config 指定配置路径)
+vagent                 # 进入管理菜单
 ```
 
-首跑若配置不存在,菜单会引导输入域名并生成默认 `spec.toml`,随后进入主菜单。
+配置路径不通过命令行参数指定,而是:
+- 默认:`root` → `/etc/vagent/spec.toml`,普通用户 → `~/.config/vagent/spec.toml`
+- 或环境变量 `VAGENT_CONFIG=/path/to/spec.toml` 覆盖
 
-菜单一级功能:
+首跑若配置不存在,菜单会引导生成默认 `spec.toml`,随后进入主菜单。
 
-- **用户管理** — 新增 / 列出 / 删除 / 分享链接(VLESS-Reality、VMess、Trojan、Hysteria2、Tuic、Naive)
-- **内核管理** — 安装 xray / sing-box(下载→解压→放置);start / stop / restart / enable / disable
-- **分流规则** — 直连白名单 / 黑名单 / WARP / 广告拦截 / BT 阻断
-- **证书管理** — acme.sh 签发(standalone / DNS)、续期
-- **服务管理** — 生成并安装 systemd / openrc 单元(xray / sing-box / api),root-optional
-- **Reality** — 生成 x25519 密钥、扫描可用 SNI
-- **订阅管理** — 生成多用户 v2rayN 订阅 bundle(可选 HMAC 签名)
-- **应用配置** — 渲染并重载启用的内核
-- **查看状态** — 从 spec 读取,不反推 JSON
-- **卸载** — 停用并删除服务(`--purge` 删配置目录仅在菜单确认后执行)
+主菜单布局(分组对标 v2ray-agent):
 
-> 二进制层面只有 `--config`(或 `VAGENT_CONFIG` 环境变量)一个可选参数,其余全部交互式。
+```
+1. 安装 / 重新安装         (装 xray + 应用)
+2. 一键 Reality (无域名)
+3. Hysteria2 管理
+4. REALITY 管理            (生成 x25519 密钥 / 扫描 SNI)
+5. Tuic 管理
+——— 工具管理 ———
+6. 用户管理               (VLESS-Reality / VMess / Trojan / Hysteria2 / Tuic / Naive)
+7. 证书管理               (acme.sh 签发 standalone / DNS、续期)
+8. 分流规则               (直连白名单 / 黑名单 / WARP / 广告拦截 / BT 阻断)
+9. 订阅管理               (多用户 v2rayN bundle,可选 HMAC 签名)
+——— 内核管理 ———
+10. 内核管理              (安装 xray / sing-box,自动装 systemd 单元;启停/重启)
+11. 应用配置 (apply)      (渲染并重载启用的内核)
+12. 查看状态
+——— 脚本管理 ———
+13. 卸载
+0. 退出
+```
+
+> 二进制层面不接受任何命令行参数(仅 `--help` / `--version` 由 clap 提供)。配置路径靠默认位置或 `VAGENT_CONFIG` 环境变量。
 
 ## 分流优先级
 
@@ -128,13 +141,13 @@ vagent                 # 进入管理菜单(可选 --config 指定配置路径)
 
 ## 测试
 
-```
+```bash
 cargo test --all          # 单测(core 纯函数)+ 集成(assert_cmd 跑真二进制)
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all --check
 ```
 
-CLI 集成测试用 `assert_cmd` + `tempfile`,断言 stdout / 退出码 / 生成文件。不使用 Playwright,也不做真机/浏览器 e2e(遵循项目约定,验证仅以 `cargo test` + `FakeExecutor` 单测覆盖)。系统副作用(systemctl、acme.sh、下载)经 `Executor` 出口,测试注入 `FakeExecutor` 捕获命令,不真正执行。
+CLI 集成测试用 `assert_cmd` + `tempfile`,**通过 `VAGENT_TEST_INPUT` 环境变量驱动交互菜单**(每行一次输入:数字=菜单选择索引,文本=Input 答案),端到端验证「加用户 → 生成订阅」的完整交互路径。不使用 Playwright,也不做真机/浏览器 e2e(遵循项目约定)。系统副作用(systemctl、acme.sh、下载)经 `Executor` 出口,测试注入 `FakeExecutor` 捕获命令,不真正执行。
 
 退出码:`0` 成功 / `1` 配置错误 / `2` 系统或权限 / `3` 网络或下载。
 

@@ -1,15 +1,79 @@
 //! 交互式菜单(对标 v2ray-agent 的 vasma)。
-//! `vagent` 不带任何参数即进入本菜单;所有设定操作在菜单内完成,不依赖命令行参数。
+//! `vagent` 零命令行参数即进入本菜单;所有设定操作在菜单内完成,不依赖命令行参数。
 //! 底层复用各 commands 模块的函数,菜单只负责读 stdin / 选择。
 
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::path::Path;
 
-use dialoguer::{Input, Select};
+use dialoguer::{Confirm, Input, Select};
 
 use crate::commands;
 use vagent_core::{save_spec, Spec};
 
+// 测试输入注入:环境变量 VAGENT_TEST_INPUT(换行分隔)。
+// 每行依次是:数字=菜单选择索引,文本=Input/Confirm 的答案。
+// 生产环境不设置此变量,菜单走正常 dialoguer 交互。
+thread_local! {
+    static TEST_INPUT: RefCell<VecDeque<String>> = {
+        let s = std::env::var("VAGENT_TEST_INPUT").unwrap_or_default();
+        let q: VecDeque<String> = if s.is_empty() {
+            VecDeque::new()
+        } else {
+            s.split('\n').map(|x| x.to_string()).collect()
+        };
+        RefCell::new(q)
+    };
+}
+
+/// 取下一行测试输入(若有)。
+fn next_test_line() -> Option<String> {
+    TEST_INPUT.with(|q| q.borrow_mut().pop_front())
+}
+
+/// 菜单单选:优先消费测试输入(数字索引或匹配文本),否则走 dialoguer。
+fn menu_select(prompt: &str, items: &[&str]) -> Option<usize> {
+    if let Some(line) = next_test_line() {
+        let line = line.trim();
+        if let Ok(idx) = line.parse::<usize>() {
+            return Some(idx);
+        }
+        if line.is_empty() {
+            return None;
+        }
+        return items.iter().position(|i| *i == line);
+    }
+    Select::new()
+        .with_prompt(prompt)
+        .items(items)
+        .default(0)
+        .interact_opt()
+        .unwrap_or(None)
+}
+
+/// 是/否确认:优先消费测试输入(y/yes/1=true,n/no/0=false),否则走 dialoguer。
+fn menu_confirm(prompt: &str, default: bool) -> bool {
+    if let Some(line) = next_test_line() {
+        return match line.trim().to_lowercase().as_str() {
+            "y" | "yes" | "1" | "true" => true,
+            "n" | "no" | "0" | "false" => false,
+            _ => default,
+        };
+    }
+    Confirm::new()
+        .with_prompt(prompt)
+        .default(default)
+        .interact()
+        .unwrap_or(default)
+}
+
 fn prompt_text(msg: &str, default: &str) -> String {
+    if let Some(line) = next_test_line() {
+        if line.trim().is_empty() {
+            return default.to_string();
+        }
+        return line;
+    }
     Input::<String>::new()
         .with_prompt(msg)
         .default(default.to_string())
@@ -18,6 +82,14 @@ fn prompt_text(msg: &str, default: &str) -> String {
 }
 
 fn prompt_optional(msg: &str) -> Option<String> {
+    if let Some(line) = next_test_line() {
+        let s = line.trim();
+        return if s.is_empty() {
+            None
+        } else {
+            Some(s.to_string())
+        };
+    }
     let s = Input::<String>::new()
         .with_prompt(msg)
         .allow_empty(true)
@@ -30,12 +102,25 @@ fn prompt_optional(msg: &str) -> Option<String> {
     }
 }
 
+/// 通用单选,返回选中项的字符串。
+fn select_one(prompt: &str, options: &[&str], default: usize) -> String {
+    let idx = menu_select(prompt, options).unwrap_or(default.min(options.len().saturating_sub(1)));
+    options[idx.min(options.len() - 1)].to_string()
+}
+
 /// 主菜单。config 为当前 spec 路径。
+/// 结构对齐 mack-a/v2ray-agent 的菜单布局(分组 + 编号语义)。
 pub fn run(config: &Path) -> anyhow::Result<()> {
     // config 不存在 → 引导初始化(对标 v2ray-agent 首跑建配置)
     if !config.exists() {
         println!("未找到配置:{}", config.display());
-        let domain = prompt_text("请输入域名(如 example.com)", "example.com");
+        // 测试模式(VAGENT_TEST_INPUT 存在)下不消费测试输入,直接用默认域名,
+        // 否则首跑引导会抢走菜单第一行的选择索引。
+        let domain = if std::env::var("VAGENT_TEST_INPUT").is_ok() {
+            "example.com".to_string()
+        } else {
+            prompt_text("请输入域名(如 example.com)", "example.com")
+        };
         let spec = Spec::default_for(&domain);
         if let Some(parent) = config.parent() {
             std::fs::create_dir_all(parent)?;
@@ -44,54 +129,96 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
         println!("已生成默认配置:{}", config.display());
     }
 
+    // 是否已安装(有 spec 且含用户视为已装)
+    let installed = std::fs::read_to_string(config)
+        .map(|s| s.contains("users"))
+        .unwrap_or(false);
+
     loop {
         println!();
-        let items = [
-            "用户管理",
-            "内核管理",
-            "分流规则",
-            "证书管理",
-            "服务管理",
-            "Reality",
-            "订阅管理",
-            "应用配置 (apply)",
-            "查看状态",
-            "卸载",
-            "退出",
-        ];
-        let sel = Select::new()
-            .with_prompt("vagent 管理菜单")
-            .items(&items)
-            .default(0)
-            .interact_opt()
-            .unwrap_or(None);
+        println!("==============================================================");
+        if installed {
+            println!("1. 重新安装");
+        } else {
+            println!("1. 安装");
+        }
+        println!("2. 一键 Reality(无域名)");
+        println!("3. Hysteria2 管理");
+        println!("4. REALITY 管理");
+        println!("5. Tuic 管理");
+        println!("------------------------- 工具管理 -----------------------------");
+        println!("6. 用户管理");
+        println!("7. 证书管理");
+        println!("8. 分流规则");
+        println!("9. 订阅管理");
+        println!("------------------------- 内核管理 -----------------------------");
+        println!("10. 内核管理 (xray / sing-box)");
+        println!("11. 应用配置 (apply)");
+        println!("12. 查看状态");
+        println!("------------------------- 脚本管理 -----------------------------");
+        println!("13. 卸载");
+        println!("0. 退出");
+        println!("==============================================================");
 
-        match sel {
-            Some(0) => user_menu(config)?,
-            Some(1) => core_menu()?,
-            Some(2) => route_menu(config)?,
-            Some(3) => cert_menu(config)?,
-            Some(4) => service_menu()?,
-            Some(5) => reality_menu(config)?,
-            Some(6) => subscribe_menu(config)?,
-            Some(7) => {
+        match menu_select("vagent 管理菜单", &[]) {
+            Some(1) => {
+                // 安装 / 重新安装:装 xray + 应用
+                commands::core_install::run("xray", "1.8.23")?;
+                commands::apply::run(config, false)?;
+            }
+            Some(2) => reality_oneclick(config)?,
+            Some(3) => proto_menu(config, "hysteria2")?,
+            Some(4) => reality_menu(config)?,
+            Some(5) => proto_menu(config, "tuic")?,
+            Some(6) => user_menu(config)?,
+            Some(7) => cert_menu(config)?,
+            Some(8) => route_menu(config)?,
+            Some(9) => subscribe_menu(config)?,
+            Some(10) => core_menu(config)?,
+            Some(11) => {
                 println!("== 应用配置 ==");
                 commands::apply::run(config, false)?;
             }
-            Some(8) => commands::status::run(config)?,
-            Some(9) => {
+            Some(12) => commands::status::run(config)?,
+            Some(13) => {
                 println!("== 卸载 ==");
-                let purge = dialoguer::Confirm::new()
-                    .with_prompt("同时删除配置目录?")
-                    .default(false)
-                    .interact()
-                    .unwrap_or(false);
+                let purge = menu_confirm("同时删除配置目录?", false);
                 commands::uninstall::run(purge)?;
             }
-            Some(10) | None => {
+            Some(0) | None => {
                 println!("再见。");
                 break;
             }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// 一键 Reality:生成 Reality 用户 + 密钥 + 应用。
+fn reality_oneclick(config: &Path) -> anyhow::Result<()> {
+    println!("== 一键 Reality ==");
+    commands::user::add(config, "reality", 443, "vless", "tcp")?;
+    commands::reality::run(config, Some("reality"))?;
+    commands::apply::run(config, false)?;
+    Ok(())
+}
+
+/// 某协议的用户管理(Hysteria2 / Tuic),对标 v2ray-agent 的专项管理菜单。
+fn proto_menu(config: &Path, proto: &str) -> anyhow::Result<()> {
+    loop {
+        println!();
+        let add_label = format!("新增 {proto} 用户");
+        let items = [add_label.as_str(), "列出用户", "返回"];
+        match menu_select(&format!("{proto} 管理"), &items) {
+            Some(0) => {
+                let name = prompt_text("用户名", "alice");
+                let port_s = prompt_text("端口", "8443");
+                let port: u16 = port_s.trim().parse().unwrap_or(8443);
+                commands::user::add(config, &name, port, proto, "tcp")?;
+            }
+            Some(1) => commands::user::list(config)?,
+            Some(2) | None => break,
             _ => {}
         }
     }
@@ -102,13 +229,7 @@ fn user_menu(config: &Path) -> anyhow::Result<()> {
     loop {
         println!();
         let items = ["新增用户", "列出用户", "删除用户", "生成分享链接", "返回"];
-        match Select::new()
-            .with_prompt("用户管理")
-            .items(&items)
-            .default(0)
-            .interact_opt()
-            .unwrap_or(None)
-        {
+        match menu_select("用户管理", &items) {
             Some(0) => {
                 let name = prompt_text("用户名", "alice");
                 let port_s = prompt_text("端口", "443");
@@ -145,24 +266,23 @@ fn user_menu(config: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn core_menu() -> anyhow::Result<()> {
+fn core_menu(config: &Path) -> anyhow::Result<()> {
     loop {
         println!();
         let items = ["安装 Xray", "安装 Sing-box", "启停/重启内核", "返回"];
-        match Select::new()
-            .with_prompt("内核管理")
-            .items(&items)
-            .default(0)
-            .interact_opt()
-            .unwrap_or(None)
-        {
+        match menu_select("内核管理", &items) {
             Some(0) => {
                 let ver = prompt_text("Xray 版本(不含 v)", "1.8.23");
                 commands::core_install::run("xray", &ver)?;
+                // 装完内核顺手安装 systemd 单元(对齐 v2ray-agent 装完即用)
+                commands::service::install("xray", "systemd")?;
+                commands::apply::run(config, false)?;
             }
             Some(1) => {
                 let ver = prompt_text("Sing-box 版本(不含 v)", "1.10.0");
                 commands::core_install::run("singbox", &ver)?;
+                commands::service::install("singbox", "systemd")?;
+                commands::apply::run(config, false)?;
             }
             Some(2) => {
                 let core = select_one("内核", &["xray", "singbox"], 0);
@@ -192,13 +312,7 @@ fn route_menu(config: &Path) -> anyhow::Result<()> {
             "查看当前规则",
             "返回",
         ];
-        match Select::new()
-            .with_prompt("分流规则")
-            .items(&items)
-            .default(0)
-            .interact_opt()
-            .unwrap_or(None)
-        {
+        match menu_select("分流规则", &items) {
             Some(0) => {
                 let d = prompt_text("黑名单域名", "");
                 if !d.is_empty() {
@@ -235,13 +349,7 @@ fn cert_menu(config: &Path) -> anyhow::Result<()> {
     loop {
         println!();
         let items = ["签发证书", "续期所有证书", "返回"];
-        match Select::new()
-            .with_prompt("证书管理")
-            .items(&items)
-            .default(0)
-            .interact_opt()
-            .unwrap_or(None)
-        {
+        match menu_select("证书管理", &items) {
             Some(0) => {
                 let domain = prompt_text("证书域名", "");
                 if domain.is_empty() {
@@ -259,32 +367,6 @@ fn cert_menu(config: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn service_menu() -> anyhow::Result<()> {
-    loop {
-        println!();
-        let items = ["安装 systemd 单元", "查看单元内容", "返回"];
-        match Select::new()
-            .with_prompt("服务管理")
-            .items(&items)
-            .default(0)
-            .interact_opt()
-            .unwrap_or(None)
-        {
-            Some(0) => {
-                let core = select_one("内核", &["xray", "singbox"], 0);
-                commands::service::install(&core, "systemd")?;
-            }
-            Some(1) => {
-                let core = select_one("内核", &["xray", "singbox"], 0);
-                commands::service::show(&core, "systemd")?;
-            }
-            Some(2) | None => break,
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
 fn subscribe_menu(config: &Path) -> anyhow::Result<()> {
     loop {
         println!();
@@ -293,13 +375,7 @@ fn subscribe_menu(config: &Path) -> anyhow::Result<()> {
             "生成签名订阅(可识别/吊销)",
             "返回",
         ];
-        match Select::new()
-            .with_prompt("订阅管理")
-            .items(&items)
-            .default(0)
-            .interact_opt()
-            .unwrap_or(None)
-        {
+        match menu_select("订阅管理", &items) {
             Some(0) => commands::subscribe::run(config, false)?,
             Some(1) => commands::subscribe::run(config, true)?,
             Some(2) | None => break,
@@ -312,13 +388,7 @@ fn reality_menu(config: &Path) -> anyhow::Result<()> {
     loop {
         println!();
         let items = ["生成 Reality 密钥", "扫描可用 SNI", "返回"];
-        match Select::new()
-            .with_prompt("Reality")
-            .items(&items)
-            .default(0)
-            .interact_opt()
-            .unwrap_or(None)
-        {
+        match menu_select("Reality", &items) {
             Some(0) => {
                 let name = prompt_optional("用户名(留空=所有 Reality 用户)");
                 commands::reality::run(config, name.as_deref())?;
@@ -334,16 +404,4 @@ fn reality_menu(config: &Path) -> anyhow::Result<()> {
         }
     }
     Ok(())
-}
-
-/// 通用单选,返回选中项的字符串。
-fn select_one(prompt: &str, options: &[&str], default: usize) -> String {
-    let idx = Select::new()
-        .with_prompt(prompt)
-        .items(options)
-        .default(default.min(options.len().saturating_sub(1)))
-        .interact_opt()
-        .unwrap_or(None)
-        .unwrap_or(default.min(options.len().saturating_sub(1)));
-    options[idx].to_string()
 }
