@@ -42,18 +42,12 @@ fn stream_for(transport: &Transport) -> serde_json::Value {
 }
 
 fn vless_reality(u: &User, spec: &Spec, transport: &Transport) -> Result<serde_json::Value, Error> {
-    // reality 用户必须有真实公钥,缺失则报错而非发射 <generated-by-xray> 占位符
-    if u.reality_pbk.is_empty() {
-        return Err(Error::Render(format!(
-            "用户 {} 是 Reality 用户但未生成密钥(reality_pbk 为空),无法渲染配置",
-            u.name
-        )));
-    }
-    let pbk = u.reality_pbk.clone();
-    let sid = if u.reality_sid.is_empty() {
-        "".to_string()
+    // 单一真相源:reality 用户必须有真实公钥,缺失即 Err(不再内联检查)
+    let (pbk, sid) = u.require_reality_keys()?;
+    let sid = if sid.is_empty() {
+        String::new()
     } else {
-        u.reality_sid.clone()
+        sid.to_string()
     };
     let mut stream = stream_for(transport);
     stream["security"] = serde_json::json!("reality");
