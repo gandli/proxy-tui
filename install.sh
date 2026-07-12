@@ -44,10 +44,6 @@ fi
 echo "目标版本: $VERSION"
 
 BASE="https://github.com/${REPO}/releases/download/${VERSION}"
-# latest 无 tag,改用 main 分支的 dist 资产兜底(若存在)
-if [ "$VERSION" = "latest" ]; then
-  BASE="https://raw.githubusercontent.com/${REPO}/main/dist"
-fi
 
 echo "== 下载 musl 单文件二进制 =="
 if [ "${SKIP_DOWNLOAD:-0}" = "1" ]; then
