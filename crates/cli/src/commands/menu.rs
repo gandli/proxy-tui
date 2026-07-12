@@ -7,6 +7,7 @@ use std::path::Path;
 use dialoguer::{Input, Select};
 
 use crate::commands;
+use vagent_core::{save_spec, Spec};
 
 fn prompt_text(msg: &str, default: &str) -> String {
     Input::<String>::new()
@@ -31,6 +32,18 @@ fn prompt_optional(msg: &str) -> Option<String> {
 
 /// 主菜单。config 为当前 spec 路径。
 pub fn run(config: &Path) -> anyhow::Result<()> {
+    // config 不存在 → 引导初始化(对标 v2ray-agent 首跑建配置)
+    if !config.exists() {
+        println!("未找到配置:{}", config.display());
+        let domain = prompt_text("请输入域名(如 example.com)", "example.com");
+        let spec = Spec::default_for(&domain);
+        if let Some(parent) = config.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        save_spec(&spec, config)?;
+        println!("已生成默认配置:{}", config.display());
+    }
+
     loop {
         println!();
         let items = [

@@ -18,9 +18,9 @@ wget -P ~ -N --no-check-certificate "https://raw.githubusercontent.com/gandli/pr
 vagent            # 进入管理菜单:用户 / 内核 / 分流 / 证书 / Reality / 应用 ...
 ```
 
-菜单内一级导航:用户管理 · 内核管理 · 分流规则 · 证书管理 · 服务管理 · Reality · 应用配置 · 查看状态 · 卸载。
+菜单内一级导航:用户管理 · 内核管理 · 分流规则 · 证书管理 · 服务管理 · Reality · 订阅管理 · 应用配置 · 查看状态 · 卸载。
 
-> 子命令(如 `vagent user-add alice`)仍保留,供脚本与自动化调用,与菜单等价。
+> `vagent` 不接受子命令参数,所有操作在菜单内完成。仅 `--config`(或 `VAGENT_CONFIG`)可选指定配置路径。
 
 ## 普通用户(非 root)用法
 
@@ -73,7 +73,7 @@ spec.toml ──┬─→ render/xray    → <base>/cores/xray/config.json
 | crate | 职责 |
 |---|---|
 | `core` | 共享核心库:spec、渲染、订阅、路由、TLS、systemd、下载。全部可单测 |
-| `cli` | `vagent` 命令行,薄封装:解析参数 + 调 core |
+| `cli` | `vagent` 命令行:交互菜单,无子命令参数,菜单内调用 core/commands |
 | `bot` | Telegram bot(teloxide,UID 白名单,token 走 `VAGENT_BOT_TOKEN`) |
 | `api` | axum loopback API(127.0.0.1:7800)+ 零 JS 面板 |
 
@@ -93,62 +93,38 @@ spec.toml ──┬─→ render/xray    → <base>/cores/xray/config.json
 
 ## 命令
 
-```
-vagent init --domain example.com          # 生成初始 spec
-vagent apply [--dry-run]                   # 渲染并重载启用的内核
+`vagent` 不接受任何子命令参数。直接运行即进入交互式管理菜单,所有操作(用户、内核、分流、证书、Reality、订阅、服务、状态、卸载)都在菜单内点选/输入完成:
 
-# 用户
-vagent user-add alice --protocol vless --port 443
-vagent user-list
-vagent user-link alice                     # 输出分享链接
-vagent user-del alice
-vagent user-add bob --protocol hysteria2 --port 8443 --transport tcp   # 指定协议/传输
-
-# Reality 密钥与 SNI
-vagent reality-gen                          # 用 xray x25519 为所有 Reality 用户生成真实密钥
-vagent reality-scan 1.2.3.4                 # 扫描公网 IP 可用 SNI(RealiTLScanner)
-
-# 内核生命周期
-vagent core start   --core xray            # start/stop/restart/enable/disable
-vagent core-install --core xray --version 1.8.0
-
-# 服务单元(systemd / openrc)
-vagent service show   --core xray --init systemd
-vagent service install --core xray --init openrc   # Alpine 用 openrc
-vagent service install --core api  --init systemd  # 面板 API 单元(同样 root-optional)
-
-# 分流
-vagent route direct bank.com               # 强制直连白名单
-vagent route warp   netflix.com            # 走 WARP 出站
-vagent route block  evil.com               # 黑名单
-vagent route ads on                        # geosite 广告拦截
-vagent route bt  on                        # 阻断 BT
-vagent route list
-
-# 证书(acme.sh)
-vagent cert-issue example.com --ca letsencrypt          # standalone
-vagent cert-issue example.com --ca zerossl --dns dns_cf # DNS 验证
-vagent cert-renew
-
-# 卸载
-vagent uninstall [--purge]                 # --purge 一并删配置目录
-
-# 订阅(把多用户节点打包成一个订阅 URL 发给别人)
-vagent subscribe                            # 输出 v2rayN 格式订阅 bundle(base64)
-vagent subscribe --sign                     # 带服务端 HMAC 签名(用于识别/吊销)
+```bash
+vagent                 # 进入管理菜单(可选 --config 指定配置路径)
 ```
 
-配置路径优先级:`--config` > `VAGENT_CONFIG` 环境变量 > 默认(`root` → `/etc/vagent/spec.toml`,普通用户 → `~/.config/vagent/spec.toml`)。所有派生路径(证书、内核配置、secret)都从 spec 的父目录推导。
+首跑若配置不存在,菜单会引导输入域名并生成默认 `spec.toml`,随后进入主菜单。
+
+菜单一级功能:
+
+- **用户管理** — 新增 / 列出 / 删除 / 分享链接(VLESS-Reality、VMess、Trojan、Hysteria2、Tuic、Naive)
+- **内核管理** — 安装 xray / sing-box(下载→解压→放置);start / stop / restart / enable / disable
+- **分流规则** — 直连白名单 / 黑名单 / WARP / 广告拦截 / BT 阻断
+- **证书管理** — acme.sh 签发(standalone / DNS)、续期
+- **服务管理** — 生成并安装 systemd / openrc 单元(xray / sing-box / api),root-optional
+- **Reality** — 生成 x25519 密钥、扫描可用 SNI
+- **订阅管理** — 生成多用户 v2rayN 订阅 bundle(可选 HMAC 签名)
+- **应用配置** — 渲染并重载启用的内核
+- **查看状态** — 从 spec 读取,不反推 JSON
+- **卸载** — 停用并删除服务(`--purge` 删配置目录仅在菜单确认后执行)
+
+> 二进制层面只有 `--config`(或 `VAGENT_CONFIG` 环境变量)一个可选参数,其余全部交互式。
 
 ## 分流优先级
 
-规则按顺序取首个匹配:
+规则按顺序取首个匹配(均在菜单「分流规则」中配置):
 
-1. 直连白名单(`route direct`)
-2. 广告拦截(`route ads on`)
-3. 域名黑名单(`route block`)
-4. BT 阻断(`route bt on`)
-5. WARP 分流(`route warp`)
+1. 直连白名单
+2. 广告拦截
+3. 域名黑名单
+4. BT 阻断
+5. WARP 分流
 
 ## 测试
 
@@ -173,6 +149,6 @@ cargo build --release --target x86_64-unknown-linux-musl
 ## 开发流程
 
 1. core 逻辑先行 → 单测
-2. CLI 封装 → `assert_cmd` 集成测试
-3. 发布前:`cargo test --all` + clippy `-D warnings` + fmt
+2. CLI 仅为交互菜单,无子命令参数;菜单内调用 core/commands 函数
+3. 发布前:`make check`(cargo fmt + test + clippy)
 4. 变更走 PR,不直推 main
