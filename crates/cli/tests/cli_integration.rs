@@ -1,25 +1,64 @@
 //! CLI 集成测试(黑盒)。
-//! 设计原则:CLI 不接受子命令参数,`vagent` 直接进交互菜单。
-//! 非 tty 环境下 dialoguer 直接返回默认值/None,菜单优雅退出(exit 0)。
-//! 真实业务逻辑由 core crate 的单元测试 + cli 内联测试覆盖。
+//! 设计原则:CLI 零命令行参数,`vagent` 直接进交互菜单。
+//! 配置路径仅来自 VAGENT_CONFIG 环境变量或默认位置。
+//! 菜单交互由 VAGENT_TEST_INPUT 环境变量驱动(每行一次输入:数字=菜单索引,文本=Input 答案)。
+//! 非 tty 环境下若输入耗尽,菜单优雅退出。
+//! 真实业务逻辑由 core crate 的单元测试覆盖。
 
 use assert_cmd::Command;
 use tempfile::tempdir;
 
+/// 构造菜单输入序列(每行一次消费)。
+/// 主菜单索引(对齐 v2ray-agent):
+/// 1安装 2一键Reality 3Hysteria2 4REALITY 5Tuic 6用户 7证书 8分流 9订阅
+/// 10内核 11应用 12状态 13卸载 0退出
+/// 用户子菜单: 0新增 1列出 2删除 3链接 4返回
+/// 订阅子菜单: 0生成 1签名 2返回
+const FLOW_ADD_USER_AND_SUBSCRIBE: &str = "\
+6
+0
+alice
+443
+0
+4
+9
+0
+2
+0
+";
+
 #[test]
-fn vagent_no_args_enters_menu_and_exits_clean() {
+fn menu_flow_adds_user_and_generates_subscribe() {
     let tmp = tempdir().unwrap();
-    // 用一个不存在的 config,引导初始化会写默认 spec 后再进菜单
+    let cfg = tmp.path().join("vagent").join("spec.toml");
+
+    let mut cmd = Command::cargo_bin("vagent").unwrap();
+    cmd.env("HOME", tmp.path())
+        .env("VAGENT_CONFIG", &cfg)
+        .env("VAGENT_TEST_INPUT", FLOW_ADD_USER_AND_SUBSCRIBE);
+    let output = cmd.output().unwrap();
+    assert!(output.status.success(), "vagent 菜单流应成功退出");
+
+    // spec 应已生成并含 alice 用户
+    assert!(cfg.exists(), "菜单首跑应生成默认配置: {}", cfg.display());
+    let spec = std::fs::read_to_string(&cfg).unwrap();
+    assert!(spec.contains("alice"), "spec 应含用户 alice:\n{spec}");
+
+    // 订阅输出应包含 alice(从 stdout 捕获)
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alice"), "订阅输出应含 alice:\n{stdout}");
+}
+
+#[test]
+fn menu_no_input_exits_clean() {
+    let tmp = tempdir().unwrap();
     let cfg = tmp.path().join("nope").join("spec.toml");
     let assert = Command::cargo_bin("vagent")
         .unwrap()
         .env("HOME", tmp.path())
-        .arg("--config")
-        .arg(&cfg)
+        .env("VAGENT_CONFIG", &cfg)
         .assert();
-    // 非 tty 下菜单优雅退出,退出码 0(即使 config 原本不存在)
     assert.success();
-    // 引导初始化应已生成默认 spec
     assert!(
         cfg.exists(),
         "vagent 首跑应引导生成默认配置: {}",

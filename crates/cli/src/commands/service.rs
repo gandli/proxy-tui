@@ -21,6 +21,7 @@ fn bin_path() -> String {
 }
 
 /// 为指定内核生成并打印单元内容(不落盘)。
+#[allow(dead_code)]
 pub fn show(core: &str, init: &str) -> anyhow::Result<()> {
     let init = InitSystem::from_str(init).map_err(|e| anyhow::anyhow!(e))?;
     let config = Spec::default_config_path();

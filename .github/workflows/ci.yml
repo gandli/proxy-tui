@@ -58,36 +58,27 @@ jobs:
         uses: dtolnay/rust-toolchain@1.97.0
       - name: Build
         run: cargo build --release --bins
-      - name: Download xray-core
-        run: |
-          VER="v1.8.23"
-          curl -fsSL -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/${VER}/Xray-linux-64.zip"
-          unzip -oq xray.zip -d xray-bin
-          cp xray-bin/xray /usr/local/bin/xray && chmod +x /usr/local/bin/xray
-          echo "xray $VER"
-      - name: Download sing-box
-        run: |
-          SVER="v1.10.0"
-          # 资产名无 v 前缀
-          curl -fsSL -o sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/${SVER}/sing-box-${SVER#v}-linux-amd64.tar.gz"
-          tar xzf sb.tar.gz
-          mv sing-box-*/sing-box ./sing-box-bin 2>/dev/null || true
-          echo "sing-box $SVER"
       - name: Default config path (no-root, ~/.config/vagent)
         run: |
           rm -rf "$HOME/.config/vagent"
-          # 首跑:无 config 时菜单引导生成默认 spec(非交互优雅退出)
+          # 零参数首跑:无 config 时菜单引导生成默认 spec(非交互优雅退出)
           ./target/release/vagent </dev/null
           test -f "$HOME/.config/vagent/spec.toml" && echo "DEFAULT PATH OK: $HOME/.config/vagent/spec.toml"
-      - name: Render + validate xray config
+      - name: Config via VAGENT_CONFIG env
         run: |
-          # 生成默认 spec(非交互首跑)+ 生成 Reality 密钥 + 渲染 xray
-          ./target/release/vagent --config /tmp/spec.toml </dev/null
-          ./target/release/vagent --reality-gen --config /tmp/spec.toml
-          ./target/release/vagent --render xray --config /tmp/spec.toml > /tmp/xray.json
-          ./xray-bin/xray run -test -config /tmp/xray.json && echo "XRAY CONFIG OK"
-      # sing-box 渲染正确性由 core crate 单测(SingboxCore::render)覆盖;
-      # 非交互环境下无法用菜单添加 tuic 用户,故不在此做端到端加载验证。
+          # 配置路径也可经环境变量指定(零命令行参数)
+          rm -rf /tmp/vagent-ci
+          VAGENT_CONFIG=/tmp/vagent-ci/spec.toml ./target/release/vagent </dev/null
+          test -f /tmp/vagent-ci/spec.toml && echo "VAGENT_CONFIG OK: /tmp/vagent-ci/spec.toml"
+      - name: Version flag
+        run: ./target/release/vagent --version && echo "VERSION OK"
+      - name: Menu interaction flow (add user + subscribe via VAGENT_TEST_INPUT)
+        run: |
+          rm -rf /tmp/vagent-ci-menu
+          export VAGENT_CONFIG=/tmp/vagent-ci-menu/spec.toml
+          # 主菜单:6用户 → 0新增 → alice/443/0(vless) → 4返回 → 9订阅 → 0生成 → 2返回 → 0退出
+          printf '6\n0\nalice\n443\n0\n4\n9\n0\n2\n0\n' | ./target/release/vagent
+          grep -q 'name = "alice"' "$VAGENT_CONFIG" && echo "MENU FLOW OK: alice added via interactive menu"
 
   release:
     runs-on: ubuntu-latest
