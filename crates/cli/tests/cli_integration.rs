@@ -15,6 +15,7 @@ use tempfile::tempdir;
 /// 用户子菜单: 0新增 1列出 2删除 3链接 4返回
 /// 订阅子菜单: 0生成 1签名 2返回
 const FLOW_ADD_USER_AND_SUBSCRIBE: &str = "\
+NONE\n\
 5\n\
 0\n\
 alice\n\
@@ -90,8 +91,8 @@ fn menu_nginx_sni_proxy_generates_conf() {
     let tmp = tempdir().unwrap();
     let cfg = tmp.path().join("vagent").join("spec.toml");
 
-    // 7 = nginx 管理; 2 = 开启伪装站 SNI 反代; 15 = 退出
-    let flow = "7\n2\n15\n";
+    // 首跑:multi_select 消费 NONE(不选协议);7 = nginx 管理;2 = 开启伪装站 SNI 反代;15 = 退出
+    let flow = "NONE\n7\n2\n15\n";
     let mut cmd = Command::cargo_bin("vagent").unwrap();
     let output = cmd
         .env("HOME", tmp.path())
@@ -151,5 +152,54 @@ fn apply_with_missing_config_exits_nonzero() {
     assert!(
         !output.status.success(),
         "配置缺失时 --apply 应返回非零退出码(而非裸 exit 或 0)"
+    );
+}
+
+#[test]
+fn init_with_multi_protocol_selection() {
+    // 安装时多选协议组合(对齐 v2ray-agent 任意组合):首跑用 `0,3,4` 选 VLESS+Hysteria2+Tuic
+    // → 生成的 spec 应含 3 个用户 + xray/singbox 双核开启
+    let tmp = tempdir().unwrap();
+    let cfg = tmp.path().join("vagent").join("spec.toml");
+    // 首跑:multi_select 消费第一行 "0,3,4";后续菜单选 15 退出
+    let input = "0,3,4\n15\n";
+    let mut cmd = Command::cargo_bin("vagent").unwrap();
+    let output = cmd
+        .env("HOME", tmp.path())
+        .env("VAGENT_CONFIG", &cfg)
+        .env("VAGENT_TEST_INPUT", input)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "首跑多选协议应成功退出");
+    // spec 应已生成且含多协议用户
+    let content = std::fs::read_to_string(&cfg).expect("spec.toml 应已生成");
+    assert!(content.contains("hysteria2"), "spec 应含 Hysteria2 用户");
+    assert!(content.contains("tuic"), "spec 应含 Tuic 用户");
+    assert!(content.contains("vless"), "spec 应含 VLESS 用户");
+}
+
+#[test]
+fn install_menu_rebuilds_spec_from_selection() {
+    // 菜单 0(安装) 多选协议组合重建 spec:选 0,3 (VLESS+Hysteria2)
+    let tmp = tempdir().unwrap();
+    let cfg = tmp.path().join("vagent").join("spec.toml");
+    // 先让 config 存在(用最小默认)
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    std::fs::write(&cfg, "version = 1\ndomain = \"x.com\"\n").unwrap();
+    // 菜单: 0(安装) → multi_select "0,3" → 后续菜单 15 退出
+    let input = "0\n0,3\n15\n";
+    let mut cmd = Command::cargo_bin("vagent").unwrap();
+    let _output = cmd
+        .env("HOME", tmp.path())
+        .env("VAGENT_CONFIG", &cfg)
+        .env("VAGENT_TEST_INPUT", input)
+        .output()
+        .unwrap();
+    // spec 重建在装内核之前已完成并落盘,无论后续装内核是否成功都应含选中协议
+    let content = std::fs::read_to_string(&cfg).expect("spec.toml 应已重建");
+    assert!(content.contains("vless"), "重建 spec 应含 VLESS 用户");
+    assert!(
+        content.contains("hysteria2"),
+        "重建 spec 应含 Hysteria2 用户"
     );
 }

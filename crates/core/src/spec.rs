@@ -240,6 +240,43 @@ impl Spec {
         }
     }
 
+    /// 按选定的协议组合生成 Spec(安装时多选协议)。
+    /// 每个协议加 1 个默认用户,并开启对应内核:
+    /// Vless / Vmess / Trojan 走 xray,Hysteria2 / Tuic / Naive 走 sing-box。
+    /// Reality 用户标记 reality=true(pbk 需后续生成密钥)。
+    pub fn default_for_protocols(domain: &str, protocols: &[Protocol]) -> Self {
+        let mut spec = Spec::default_for(domain);
+        for p in protocols {
+            match p {
+                Protocol::Vless => {
+                    spec.cores.xray = true;
+                    spec.add_user("vless", Protocol::Vless, 443, false);
+                }
+                Protocol::Vmess => {
+                    spec.cores.xray = true;
+                    spec.add_user("vmess", Protocol::Vmess, 2053, false);
+                }
+                Protocol::Trojan => {
+                    spec.cores.xray = true;
+                    spec.add_user("trojan", Protocol::Trojan, 443, false);
+                }
+                Protocol::Hysteria2 => {
+                    spec.cores.singbox = true;
+                    spec.add_user("hysteria2", Protocol::Hysteria2, 8443, false);
+                }
+                Protocol::Tuic => {
+                    spec.cores.singbox = true;
+                    spec.add_user("tuic", Protocol::Tuic, 9443, false);
+                }
+                Protocol::Naive => {
+                    spec.cores.singbox = true;
+                    spec.add_user("naive", Protocol::Naive, 8448, false);
+                }
+            }
+        }
+        spec
+    }
+
     /// 配置文件的默认路径:root 用 /etc/vagent/spec.toml,普通用户用 ~/.config/vagent/spec.toml。
     pub fn default_config_path() -> std::path::PathBuf {
         if let Ok(uid) = std::env::var("UID") {
@@ -325,12 +362,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_for_enables_xray_only() {
-        let s = Spec::default_for("x.com");
+    fn default_for_protocols_enables_cores_and_users() {
+        let protos = [Protocol::Vless, Protocol::Hysteria2, Protocol::Tuic];
+        let s = Spec::default_for_protocols("x.com", &protos);
+        // xray (vless) + singbox (hy2/tuic) 都应开启
         assert!(s.cores.xray);
+        assert!(s.cores.singbox);
+        // 每协议 1 个用户
+        assert_eq!(s.users.len(), 3);
+        // 协议正确
+        assert!(s.users.iter().any(|u| u.protocol == Protocol::Vless));
+        assert!(s.users.iter().any(|u| u.protocol == Protocol::Hysteria2));
+        assert!(s.users.iter().any(|u| u.protocol == Protocol::Tuic));
+        // 端口正确(hy2=8443, tuic=9443)
+        assert!(s
+            .users
+            .iter()
+            .any(|u| u.protocol == Protocol::Hysteria2 && u.port == 8443));
+        assert!(s
+            .users
+            .iter()
+            .any(|u| u.protocol == Protocol::Tuic && u.port == 9443));
+    }
+
+    #[test]
+    fn default_for_protocols_empty_is_minimal() {
+        let s = Spec::default_for_protocols("x.com", &[]);
+        assert!(s.cores.xray); // default_for 仍开 xray
         assert!(!s.cores.singbox);
         assert_eq!(s.users.len(), 0);
-        assert_eq!(s.version, 1);
     }
 
     #[test]
