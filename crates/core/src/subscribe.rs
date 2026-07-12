@@ -29,11 +29,14 @@ pub fn gen_user(user: &User, spec: &Spec) -> Result<String, Error> {
     let d = &spec.domain;
     let link = match &user.protocol {
         Protocol::Vless if user.reality => {
-            let pbk = if user.reality_pbk.is_empty() {
-                "<generated-by-xray>"
-            } else {
-                &user.reality_pbk
-            };
+            // reality 用户必须有真实公钥,缺失则报错而非发射 <generated-by-xray> 占位符
+            if user.reality_pbk.is_empty() {
+                return Err(Error::Render(format!(
+                    "用户 {} 是 Reality 用户但未生成密钥(reality_pbk 为空),无法生成有效链接",
+                    user.name
+                )));
+            }
+            let pbk = &user.reality_pbk;
             let sid = if user.reality_sid.is_empty() {
                 ""
             } else {
@@ -174,13 +177,16 @@ mod tests {
     #[test]
     fn gen_user_formats_vless_link() {
         let mut spec = Spec::default_for("v.example.com");
-        let u = User::new(
+        let mut u = User::new(
             "alice",
             crate::spec::Protocol::Vless,
             443,
             true,
             Transport::Tcp,
         );
+        // reality 用户须有真实公钥,否则 gen_user 应报错
+        u.reality_pbk = "abc123pubkey".to_string();
+        u.reality_sid = "abcd1234".to_string();
         spec.add_user("alice", crate::spec::Protocol::Vless, 443, true);
         let link = gen_user(&u, &spec).unwrap();
         assert!(link.starts_with("vless://"));
