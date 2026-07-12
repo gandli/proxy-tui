@@ -121,7 +121,9 @@ pub fn xray_unit(binary_path: &str, config: &str) -> String {
 }
 
 /// 生成 vagent-api.service(loopback 面板 API,systemd)。
-pub fn api_unit(binary_path: &str) -> String {
+/// root-optional:User 行与 xray 单元同策略(root=%u 普通用户)。
+pub fn api_unit(binary_path: &str, config: &str) -> String {
+    let user_line = if is_root() { "User=root" } else { "User=%u" };
     format!(
         "[Unit]\n\
 Description=vagent local API (loopback panel)\n\
@@ -129,14 +131,16 @@ After=network.target\n\
 \n\
 [Service]\n\
 Type=simple\n\
-ExecStart={bin}\n\
+ExecStart={bin} --config {cfg}\n\
 Restart=on-failure\n\
 RestartSec=3\n\
-User=root\n\
+{user}\n\
 \n\
 [Install]\n\
 WantedBy=multi-user.target\n",
-        bin = binary_path
+        bin = binary_path,
+        cfg = config,
+        user = user_line
     )
 }
 
@@ -227,9 +231,16 @@ mod tests {
 
     #[test]
     fn api_unit_looback_service() {
-        let u = api_unit("/usr/local/bin/vagent-api");
+        let u = api_unit("/usr/local/bin/vagent-api", "/etc/vagent/spec.toml");
         assert!(u.contains("vagent local API"));
-        assert!(u.contains("ExecStart=/usr/local/bin/vagent-api"));
+        assert!(u.contains("ExecStart=/usr/local/bin/vagent-api --config /etc/vagent/spec.toml"));
+        // root-optional:User 行不再永远 root
+        if is_root() {
+            assert!(u.contains("User=root"));
+        } else {
+            assert!(u.contains("User=%u"));
+            assert!(!u.contains("User=root"));
+        }
     }
 
     #[test]
