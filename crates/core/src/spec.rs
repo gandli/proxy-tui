@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::Error;
+
 /// 分流规则:黑名单域名 + BT 阻断 + 广告拦截 + WARP/直连分流。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Rules {
@@ -71,6 +73,29 @@ pub struct User {
     /// 传输层(默认 tcp)。
     #[serde(default)]
     pub transport: Transport,
+}
+
+impl User {
+    /// reality 用户必须有真实公钥,缺失即 Err(单一真相源,
+    /// 避免 <generated-by-xray> 占位符下发)。sid 可空(reality shortId 可选),
+    /// 此时返回空串。
+    pub fn require_reality_keys(&self) -> Result<(&str, &str), Error> {
+        if self.reality_pbk.is_empty() {
+            return Err(Error::Render(format!(
+                "用户 {} 是 Reality 用户但未生成密钥(reality_pbk 为空),无法生成有效链接/配置",
+                self.name
+            )));
+        }
+        // sid 可空:reality shortId 可选,空串视为未设置
+        Ok((self.reality_pbk.as_str(), self.reality_sid.as_str()))
+    }
+
+    /// 是否为可渲染的 reality 用户(有公钥)。供 bundle 等过滤复用。
+    pub fn is_renderable_reality(&self) -> bool {
+        matches!(self.protocol, Protocol::Vless)
+            && self.reality
+            && self.require_reality_keys().is_ok()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -297,5 +322,26 @@ uuid = "abc"
         let spec: Spec = toml::from_str(toml).unwrap();
         assert_eq!(spec.users[0].protocol, Protocol::Vless);
         assert!(spec.users[0].reality);
+    }
+
+    #[test]
+    fn require_reality_keys_enforces_pbk_single_source() {
+        // 单一真相源:reality 用户缺 pbk → Err;有 pbk(即使 sid 空) → Ok
+        let mut u = User::new("a", Protocol::Vless, 443, true, Transport::Tcp);
+        assert!(u.require_reality_keys().is_err(), "缺 pbk 必须 Err");
+
+        u.reality_pbk = "pbkXYZ".into();
+        // sid 可空是合法的
+        let (_pbk, sid) = u.require_reality_keys().unwrap();
+        assert_eq!(sid, "");
+
+        u.reality_sid = "sidABC".into();
+        let (_pbk, sid) = u.require_reality_keys().unwrap();
+        assert_eq!(sid, "sidABC");
+
+        // is_renderable_reality 复用同一检查
+        assert!(u.is_renderable_reality());
+        u.reality_pbk.clear();
+        assert!(!u.is_renderable_reality());
     }
 }

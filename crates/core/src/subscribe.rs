@@ -29,19 +29,9 @@ pub fn gen_user(user: &User, spec: &Spec) -> Result<String, Error> {
     let d = &spec.domain;
     let link = match &user.protocol {
         Protocol::Vless if user.reality => {
-            // reality 用户必须有真实公钥,缺失则报错而非发射 <generated-by-xray> 占位符
-            if user.reality_pbk.is_empty() {
-                return Err(Error::Render(format!(
-                    "用户 {} 是 Reality 用户但未生成密钥(reality_pbk 为空),无法生成有效链接",
-                    user.name
-                )));
-            }
-            let pbk = &user.reality_pbk;
-            let sid = if user.reality_sid.is_empty() {
-                ""
-            } else {
-                &user.reality_sid
-            };
+            // 单一真相源:reality 用户必须有真实公钥,缺失即 Err(不再内联检查)
+            let (pbk, sid) = user.require_reality_keys()?;
+            let sid = if sid.is_empty() { "" } else { sid };
             let query = format!(
                 "type={}&security=reality&pbk={}&sid={}&encryption=none&flow=xtls-rprx-vision",
                 link_type(&user.transport),
@@ -100,8 +90,7 @@ pub fn bundle(spec: &Spec) -> Result<String, Error> {
     let outbounds: Vec<serde_json::Value> = spec
         .users
         .iter()
-        .filter(|u| matches!(u.protocol, crate::spec::Protocol::Vless) && u.reality)
-        .filter(|u| !u.reality_pbk.is_empty()) // 跳过未生成密钥的 reality 用户,避免占位符下发
+        .filter(|u| u.is_renderable_reality()) // 跳过未生成密钥的 reality 用户,避免占位符下发
         .map(|u| {
             serde_json::json!({
                 "tag": u.name,
