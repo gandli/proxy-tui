@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # vagent 一键安装脚本(对标 v2ray-agent install.sh 的体验)。
 # 用法(普通用户也行):
-#   wget -P ~ -N --no-check-certificate "https://raw.githubusercontent.com/gandli/proxy-tui/main/install.sh" && bash ~/install.sh
+#   wget -P ~ -N --no-check-certificate "https://raw.githubusercontent.com/gandli/vagent/main/install.sh" && bash ~/install.sh
 #
 # 安装后直接运行 vagent 进入交互菜单,所有设定在菜单内完成(无命令行参数)。
 # 尽量不要求 root:
@@ -11,7 +11,7 @@
 # 合规边界:仅用于授权测试环境 / 自建 VPS。
 set -euo pipefail
 
-REPO="gandli/proxy-tui"
+REPO="gandli/vagent"
 VERSION="${1:-latest}"
 
 echo "== vagent 安装器 =="
@@ -44,10 +44,6 @@ fi
 echo "目标版本: $VERSION"
 
 BASE="https://github.com/${REPO}/releases/download/${VERSION}"
-# latest 无 tag,改用 main 分支的 dist 资产兜底(若存在)
-if [ "$VERSION" = "latest" ]; then
-  BASE="https://raw.githubusercontent.com/${REPO}/main/dist"
-fi
 
 echo "== 下载 musl 单文件二进制 =="
 if [ "${SKIP_DOWNLOAD:-0}" = "1" ]; then
