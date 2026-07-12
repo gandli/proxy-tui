@@ -22,6 +22,36 @@ vagent            # 进入管理菜单:用户 / 内核 / 分流 / 证书 / Reali
 
 > 子命令(如 `vagent user-add alice`)仍保留,供脚本与自动化调用,与菜单等价。
 
+## 普通用户(非 root)用法
+
+vagent 默认走 root-optional:检测到非 root 时,所有路径(配置、证书、二进制、服务单元)自动落在 `$HOME` 下,不碰 `/etc`、`/usr/local`。普通用户用 systemd `--user` 管理常驻进程。
+
+| 资源 | root 路径 | 普通用户路径 |
+|---|---|---|
+| 配置 spec | `/etc/vagent/spec.toml` | `~/.config/vagent/spec.toml` |
+| 证书 / 内核配置 / reality 扫描 | `/etc/vagent/...` | `~/.config/vagent/...` |
+| 订阅签名 secret | `/etc/vagent/secret` | `~/.config/vagent/secret` |
+| 二进制 | `/usr/local/bin` | `~/.local/bin` |
+| 服务单元 | `/etc/systemd/system` | `~/.config/systemd/user` |
+| 单元 User 行 | `root` | `%u`(当前用户) |
+| 卸载 purge | `/etc/vagent` | `~/.config/vagent` |
+
+```bash
+# 普通用户安装(自动选 ~/.local/bin + ~/.config/vagent)
+wget -P ~ -N --no-check-certificate "https://raw.githubusercontent.com/gandli/proxy-tui/main/install.sh" && bash ~/install.sh
+
+# 普通用户前台跑(无需 systemd)
+vagent apply
+vagent core start xray          # 用你自己 PATH 里的 xray 二进制
+
+# 普通用户常驻(systemd --user)
+vagent service install --core xray --init systemd
+systemctl --user daemon-reload
+systemctl --user enable --now vagent-xray
+```
+
+> 普通用户前台监听 443/80 等 <1024 端口需要 CAP_NET_BIND_SERVICE;`systemd --user` 模式下由 systemd 处理,手动前台需 `setcap` 或高端口。
+
 二进制来源:CI 自动构建的 musl 静态发行(`vagent` + `vagent-api`),安装脚本从最新 GitHub Release 拉取。普通用户安装到 `~/.local/bin` + `~/.config/vagent`,不强制 root;root 则装到 `/usr/local/bin` + `/etc/vagent` 并注册 systemd。
 
 ## 设计
@@ -29,11 +59,12 @@ vagent            # 进入管理菜单:用户 / 内核 / 分流 / 证书 / Reali
 单一真相源:一份 `spec.toml` 描述域名、内核、用户、分流规则。所有内核配置、订阅链接、systemd 单元都从 spec 渲染得出,不反向解析 JSON。
 
 ```
-spec.toml ──┬─→ render/xray    → /etc/vagent/cores/xray/config.json
-            ├─→ render/singbox → /etc/vagent/cores/singbox/config.json
+spec.toml ──┬─→ render/xray    → <base>/cores/xray/config.json
+            ├─→ render/singbox → <base>/cores/singbox/config.json
             ├─→ subscribe      → vless:// vmess:// trojan:// hysteria2:// tuic://
             └─→ routing        → 分流规则段
 ```
+> `<base>` 即 spec.toml 的父目录:`root` 为 `/etc/vagent`,普通用户为 `~/.config/vagent`。
 
 系统副作用(下载、systemctl、acme.sh、写盘)全部经 `Executor` trait 出口,测试注入 `FakeExecutor`,渲染逻辑纯函数可测。
 
@@ -84,6 +115,7 @@ vagent core-install --core xray --version 1.8.0
 # 服务单元(systemd / openrc)
 vagent service show   --core xray --init systemd
 vagent service install --core xray --init openrc   # Alpine 用 openrc
+vagent service install --core api  --init systemd  # 面板 API 单元(同样 root-optional)
 
 # 分流
 vagent route direct bank.com               # 强制直连白名单
@@ -100,9 +132,13 @@ vagent cert-renew
 
 # 卸载
 vagent uninstall [--purge]                 # --purge 一并删配置目录
+
+# 订阅(把多用户节点打包成一个订阅 URL 发给别人)
+vagent subscribe                            # 输出 v2rayN 格式订阅 bundle(base64)
+vagent subscribe --sign                     # 带服务端 HMAC 签名(用于识别/吊销)
 ```
 
-配置路径优先级:`--config` > `VAGENT_CONFIG` 环境变量 > `/etc/vagent/spec.toml`。
+配置路径优先级:`--config` > `VAGENT_CONFIG` 环境变量 > 默认(`root` → `/etc/vagent/spec.toml`,普通用户 → `~/.config/vagent/spec.toml`)。所有派生路径(证书、内核配置、secret)都从 spec 的父目录推导。
 
 ## 分流优先级
 
@@ -122,7 +158,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all --check
 ```
 
-CLI 集成测试用 `assert_cmd` + `tempfile`,断言 stdout / 退出码 / 生成文件。不使用 Playwright(浏览器测试仅面板 E2E 需要,当前不在范围)。真实写盘(需 root)与 systemd/acme.sh 副作用留待 VPS 端到端验证。
+CLI 集成测试用 `assert_cmd` + `tempfile`,断言 stdout / 退出码 / 生成文件。不使用 Playwright,也不做真机/浏览器 e2e(遵循项目约定,验证仅以 `cargo test` + `FakeExecutor` 单测覆盖)。系统副作用(systemctl、acme.sh、下载)经 `Executor` 出口,测试注入 `FakeExecutor` 捕获命令,不真正执行。
 
 退出码:`0` 成功 / `1` 配置错误 / `2` 系统或权限 / `3` 网络或下载。
 
