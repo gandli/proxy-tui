@@ -39,6 +39,37 @@ impl Rules {
     }
 }
 
+/// nginx 前端管理(占 443 反代本机 + 可选伪装站 SNI)。
+/// root VPS 标准路径:nginx 以 root 持有 443,xray/sing-box 绑高位端口(8443),
+/// 由 nginx 反代进来。非 root 部署可留空(直接用高位端口,无需 nginx)。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct NginxConfig {
+    /// 入站反代:nginx 监听 443,转发到 127.0.0.1:<reverse_port>。
+    /// 让 xray/sing-box 对外暴露标准 443(否则需绑高位端口)。
+    #[serde(default)]
+    pub reverse_proxy: bool,
+    /// 反代目标端口(本机 xray/sing-box 监听端口,通常 8443)。
+    #[serde(default = "default_reverse_port")]
+    pub reverse_port: u16,
+    /// 伪装站 SNI 反代:把流量透传到外部真实站点(domain:443),用于 Reality 流量特征伪装。
+    #[serde(default)]
+    pub sni_proxy: bool,
+}
+
+fn default_reverse_port() -> u16 {
+    8443
+}
+
+impl NginxConfig {
+    pub fn empty() -> Self {
+        NginxConfig::default()
+    }
+    /// 是否需要在渲染时生成任何 nginx 配置。
+    pub fn active(&self) -> bool {
+        self.reverse_proxy || self.sni_proxy
+    }
+}
+
 /// 声明式部署规格 —— 整个系统的唯一真相来源。
 /// 所有渲染、状态、订阅都从 Spec 推导,不反推 JSON。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -51,6 +82,9 @@ pub struct Spec {
     pub users: Vec<User>,
     #[serde(default)]
     pub rules: Rules,
+    /// nginx 前端(占 443 反代本机 + 伪装站)。默认空 = 不生成 nginx 配置。
+    #[serde(default)]
+    pub nginx: NginxConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -202,6 +236,7 @@ impl Spec {
             cores: Cores::default(),
             users: vec![],
             rules: Rules::empty(),
+            nginx: NginxConfig::empty(),
         }
     }
 
