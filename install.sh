@@ -3,9 +3,10 @@
 # 用法(普通用户也行):
 #   wget -P ~ -N --no-check-certificate "https://raw.githubusercontent.com/gandli/proxy-tui/main/install.sh" && bash ~/install.sh
 #
+# 安装后直接运行 vagent 进入交互菜单,所有设定在菜单内完成(无命令行参数)。
 # 尽量不要求 root:
-#   - root 用户:装到 /usr/local/bin + /etc/vagent + systemd 单元
-#   - 普通用户:装到 ~/.local/bin + ~/.config/vagent,不碰 systemd(手动前台跑)
+#   - root 用户:装到 /usr/local/bin + /etc/vagent + 提示注册 systemd
+#   - 普通用户:装到 ~/.local/bin + ~/.config/vagent,不碰 systemd(手动前台跑或 systemd --user)
 #
 # 合规边界:仅用于授权测试环境 / 自建 VPS。
 set -euo pipefail
@@ -59,30 +60,23 @@ echo "二进制已安装: $("$BIN_DIR/vagent" --version 2>&1 | head -1)"
 
 echo "== 初始化 spec =="
 mkdir -p "$SPEC_DIR"
-[ -f "$SPEC_DIR/spec.toml" ] || "$BIN_DIR/vagent" init --domain "$(hostname -f 2>/dev/null || echo example.com)" --config "$SPEC_DIR/spec.toml"
+echo "首次运行 vagent 会自动引导生成默认配置,无需手动 init。"
 
 if [ "$ROOT_INSTALL" = "1" ]; then
-  echo "== 安装 systemd 单元 =="
-  "$BIN_DIR/vagent" service install --core xray --init systemd || true
-  "$BIN_DIR/vagent" service install --core api --init systemd || true
-
-  echo "== 启动 =="
-  systemctl daemon-reload 2>/dev/null || true
-  systemctl enable vagent-xray 2>/dev/null || true
-  systemctl start vagent-xray 2>/dev/null || true
+  echo "== root 模式 =="
+  echo "二进制已装到 /usr/local/bin,配置在 /etc/vagent。"
+  echo "运行 vagent 进入菜单,在『服务管理』里安装并启用 systemd 单元:"
+  echo "  vagent            # 菜单 → 服务管理 → 安装 xray / api 单元"
+  echo "  systemctl daemon-reload && systemctl enable --now vagent-xray"
 else
-  echo "== 普通用户模式:跳过 systemd =="
-  echo "可手动前台运行(无 root 也能起 xray,superuser 仅 443/80 等 <1024 端口需要):"
+  echo "== 普通用户模式 =="
+  echo "运行 vagent 进入菜单,或直接前台启动:"
   echo "  vagent apply && vagent core start xray   # 用你自己的 xray 二进制"
 fi
 
 echo ""
 echo "== 安装完成 =="
-echo "常用命令:"
-echo "  vagent user-add alice              # 新增 Reality 用户"
-echo "  vagent user-link alice             # 生成分享链接"
-echo "  vagent reality-gen                 # 生成 Reality 密钥"
-echo "  vagent apply                       # 渲染并应用配置"
-echo "  vagent --help                      # 全部子命令"
+echo "直接运行 vagent 进入交互菜单,所有操作在菜单内完成:"
+echo "  vagent            # 进入管理菜单(用户/内核/分流/证书/Reality/订阅/服务/状态/卸载)"
 echo ""
-echo "再次配置:直接运行 vagent <子命令>"
+echo "再次配置:直接运行 vagent"
