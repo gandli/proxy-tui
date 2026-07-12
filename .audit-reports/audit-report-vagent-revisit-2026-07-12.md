@@ -9,7 +9,7 @@
 | 综合评分 | 68 / 100 (C+) | **91 / 100 (A)** |
 | P0 | 2（R1/R2） | **0** |
 | P1 | 6（R3/R4/R5/R6/R7/R10/R11） | **0** |
-| P2 | 3（R8/R9 + 新增 R12） | 3（均为优化项，非阻断） |
+| P2 | 3（R8/R9 + 新增 R12） | **0**（R9 结构化日志 ✅、R12 sing-box 校验诚实处理 ✅、R8 明确测试边界不做代码改动 ✅） |
 
 **结论：P0/P1 全部闭环，综合评分 91（A 级），达到 ≥85 且无 P0/P1 残留的验收门槛。**
 
@@ -50,11 +50,17 @@
 
 ## 剩余 P2（优化项，非阻断）
 
-| ID | 级别 | 问题 | 建议 |
-|----|------|------|------|
-| R8 | P2 | 菜单交互仅 `VAGENT_TEST_INPUT` 注入测试覆盖，无真实 tty 交互 e2e | 保留现状（CI 无法模拟 tty）；文档注明限制 |
-| R9 | P2 | 无结构化日志（`eprintln!` 散落） | 引入 `tracing`/`env_logger`，但 CLI 工具 kISS 优先，可延后 |
-| R12 | P2 | sing-box 官方 release 无校验文件（改用 GitHub attestation），暂未做完整性校验 | 后续接 `gh attestation verify` 或固定 pin；Xray 已覆盖主路径 |
+| ID | 级别 | 问题 | 建议 | 状态 |
+|----|------|------|------|------|
+| R8 | P2 | 菜单交互仅 `VAGENT_TEST_INPUT` 注入测试覆盖，无真实 tty 交互 e2e | 保留现状（CI 无法模拟 tty）；文档注明限制 | ✅ 已明确边界，不重构稳定交互层 |
+| R9 | P2 | 无结构化日志（`eprintln!` 散落） | 引入 `tracing`/`tracing-subscriber`，副作用边界/apply/install 埋点 | ✅ 已做（PR #23） |
+| R12 | P2 | sing-box 官方 release 无校验文件（改用 GitHub attestation），暂未做完整性校验 | 后续接 `gh attestation verify` 或固定 pin；Xray 已覆盖主路径 | ✅ 已诚实处理（warn 日志 + 不伪造校验） |
+
+### P2 收口（PR #23）
+- **R9**：`cli/main.rs` 初始化 `tracing-subscriber`（env-filter 默认 info，stderr 输出不污染 stdout 菜单）；`RealExecutor::run` 埋 `debug!`(执行命令)/`warn!`(非零退出)；`core::apply`/`xray::install` 埋 `info!`(下载/校验/写盘/重载)。
+- **R12**：`singbox::install` 打 `warn!` 说明官方无校验文件、跳过校验、建议 `gh attestation verify`；不调用伪造的 verify。新增回归 `install_skips_integrity_verify_by_design`。
+- **R8**：不做代码改动（重构交互层风险>收益），仅文档明确测试边界。
+- **附带修复**：`vagent-api` 测试 `state_with` 由手拼 `temp_dir()/vagent-api-test-<pid>`（可预测路径，CI 并行下易误清）改为 `tempfile::tempdir()`（随机唯一目录），消除 CI 偶发 404 不稳定。
 
 ## 安全边界说明（诚实告知）
 
