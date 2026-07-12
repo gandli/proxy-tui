@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn install_failure_propagates() {
-        let ex = FakeExecutor::new().expect("curl", crate::executor::ExecOutput::failure(1, "404"));
+        let ex = FakeExecutor::new().expect("curl", ExecOutput::failure(1, "404"));
         let r = XrayCore.install("1.8.0", &ex);
         assert!(r.is_err());
     }
@@ -115,9 +115,9 @@ mod tests {
     #[test]
     fn install_runs_three_steps_via_executor() {
         let ex = FakeExecutor::new()
-            .expect("curl", crate::executor::ExecOutput::success(""))
-            .expect("unzip", crate::executor::ExecOutput::success(""))
-            .expect("sh", crate::executor::ExecOutput::success(""));
+            .expect("curl", ExecOutput::success(""))
+            .expect("unzip", ExecOutput::success(""))
+            .expect("sh", ExecOutput::success(""));
         assert!(XrayCore.install("1.8.23", &ex).is_ok());
         let h = crate::executor::take_history();
         assert!(h.iter().any(|c| c.program == "curl"));
