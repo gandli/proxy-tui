@@ -71,7 +71,7 @@ if [ "$ROOT_INSTALL" = "1" ]; then
 else
   echo "== 普通用户模式 =="
   echo "运行 vagent 进入菜单,或直接前台启动:"
-  echo "  vagent apply && vagent core start xray   # 用你自己的 xray 二进制"
+  echo "  vagent            # 进入菜单 → 安装内核(自动注册 systemd --user)→ 应用配置"
 fi
 
 echo ""
