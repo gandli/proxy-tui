@@ -13,8 +13,8 @@ pub fn run(core: &str, version: &str) -> anyhow::Result<()> {
             println!("sing-box v{version} 安装完成(/usr/local/bin 或 ~/.local/bin)");
         }
         other => {
-            eprintln!("未知内核: {other}");
-            std::process::exit(1);
+            // 未知内核:返回 Err 让 main 的 ? 统一处理非零退出码(domain-cli: 不裸 exit)
+            return Err(anyhow::anyhow!("未知内核: {other}（支持 xray / singbox）"));
         }
     }
     Ok(())

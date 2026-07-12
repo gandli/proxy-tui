@@ -66,3 +66,24 @@ fn menu_no_input_exits_clean() {
         cfg.display()
     );
 }
+
+#[test]
+fn apply_with_missing_config_exits_nonzero() {
+    // domain-cli 约束:错误必须返回非零退出码,不得裸 process::exit
+    // --apply 模式配置缺失时,load_spec 失败应经 Result 传播到 main → 非零退出
+    let tmp = tempdir().unwrap();
+    let cfg = tmp.path().join("missing").join("spec.toml");
+
+    let mut cmd = Command::cargo_bin("vagent").unwrap();
+    let output = cmd
+        .env("HOME", tmp.path())
+        .env("VAGENT_CONFIG", &cfg)
+        .arg("--apply")
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "配置缺失时 --apply 应返回非零退出码(而非裸 exit 或 0)"
+    );
+}

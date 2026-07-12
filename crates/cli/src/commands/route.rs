@@ -4,19 +4,14 @@
 use std::path::Path;
 use vagent_core::{load_spec, save_spec};
 
-fn load_or_exit(config: &Path) -> vagent_core::Spec {
-    match load_spec(config) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("加载配置失败 {}: {e}", config.display());
-            std::process::exit(1);
-        }
-    }
+/// 加载配置;失败返回 Err 让 run 的 ? 统一处理非零退出码(domain-cli: 不裸 exit)。
+fn load_or_err(config: &Path) -> anyhow::Result<vagent_core::Spec> {
+    load_spec(config).map_err(|e| anyhow::anyhow!("加载配置失败 {}: {e}", config.display()))
 }
 
 /// 分流规则操作。action ∈ {block,direct,warp,ads,bt,list}。
 pub fn run(config: &Path, action: &str, value: Option<&str>) -> anyhow::Result<()> {
-    let mut spec = load_or_exit(config);
+    let mut spec = load_or_err(config)?;
     match action {
         "block" => {
             let d = require(value)?;

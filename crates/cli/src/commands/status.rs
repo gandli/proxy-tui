@@ -21,7 +21,8 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
         }
         Err(Error::Io(_)) => {
             eprintln!("config not found: {}", config.display());
-            std::process::exit(1);
+            // 返回 Err 让 main 统一非零退出码(domain-cli: 不裸 exit)
+            Err(anyhow::anyhow!("配置文件不存在: {}", config.display()))
         }
         Err(e) => Err(e.into()),
     }
