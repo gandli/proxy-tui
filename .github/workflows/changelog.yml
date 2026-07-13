@@ -1,0 +1,77 @@
+name: changelog
+
+# 自动把合并到 main 的 PR 追加到 CHANGELOG 的 [Unreleased] 段。
+# 触发:PR 合并(closed + merged)。
+# 去重:PR 编号已存在则跳过。
+# 幂等且低噪声:提交信息带 [skip ci],避免触发 CI 无限循环/浪费资源。
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Append merged PR to CHANGELOG
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # 去重:编号已记录则跳过
+          if grep -q "(#${PR_NUM})" CHANGELOG.md; then
+            echo "PR #${PR_NUM} 已在 CHANGELOG,跳过"
+            exit 0
+          fi
+
+          ENTRY="- ${PR_TITLE} (#${PR_NUM})"
+
+          # fix 类进 Fixed 段,其余(feat/docs/refactor 等)进 Added 段
+          case "${PR_TITLE}" in
+            fix* | Fix* | fixed* | Fixed* )
+              SECTION="### Fixed" ;;
+            * )
+              SECTION="### Added" ;;
+          esac
+
+          # 在对应 ### Section 行后插入 ENTRY
+          awk -v sec="${SECTION}" -v entry="${ENTRY}" '
+            { print }
+            $0 == sec { print entry }
+          ' CHANGELOG.md > CHANGELOG.tmp
+          mv CHANGELOG.tmp CHANGELOG.md
+
+          # 若 Unreleased 段尚无该 Section(极端情况),退化为追加到文件头下方
+          if ! grep -q "${ENTRY}" CHANGELOG.md; then
+            echo "插入失败,跳过"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "无变更"
+            exit 0
+          fi
+          git commit -m "docs(changelog): 追加 PR #${PR_NUM} [skip ci]"
+          git push
+
+      - name: Comment on PR
+        if: success()
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${PR_NUM}" --body "📝 CHANGELOG 已自动更新(Unreleased 段)。" || true
