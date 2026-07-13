@@ -323,10 +323,32 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
                 commands::uninstall::run(purge)?;
             }
             Some(14) => {
-                println!("== 更新提示 ==");
-                println!("vagent 以 Cargo 二进制分发。更新方式:");
-                println!("  cargo install vagent --force");
-                println!("或从仓库 Releases 下载最新单文件二进制覆盖安装。");
+                use vagent_core::executor::RealExecutor;
+                use vagent_core::update::{check_update, GitHubReleases, UpdateStatus};
+                println!("== 更新检查 ==");
+                println!("当前版本: {}", env!("CARGO_PKG_VERSION"));
+                let local = env!("CARGO_PKG_VERSION");
+                let ex = RealExecutor;
+                match check_update(
+                    local,
+                    &GitHubReleases {
+                        repo: "gandli/vagent".to_string(),
+                    },
+                    &ex,
+                ) {
+                    UpdateStatus::UpToDate => println!("✅ 已是最新版本。"),
+                    UpdateStatus::NewerAvailable { version } => {
+                        println!("⬆️  发现新版本 {version}");
+                        println!("  更新: cargo install vagent --force");
+                        println!("  或从 Releases 下载最新单文件二进制覆盖安装:");
+                        println!("  https://github.com/gandli/vagent/releases/latest");
+                    }
+                    UpdateStatus::CheckFailed { reason } => {
+                        println!("⚠️  检查更新失败: {reason}");
+                        println!("  手动更新: cargo install vagent --force");
+                        println!("  或访问 https://github.com/gandli/vagent/releases/latest");
+                    }
+                }
             }
             Some(15) | None => {
                 println!("再见。");
