@@ -164,6 +164,7 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
             "Hysteria2",
             "Tuic",
             "Naive (sing-box)",
+            "AnyTLS (sing-box)",
         ];
         let chosen = multi_select("选择要启用的协议组合(空格多选,回车确认)", &proto_items);
         let protocols: Vec<Protocol> = chosen
@@ -175,6 +176,7 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
                 3 => Some(Protocol::Hysteria2),
                 4 => Some(Protocol::Tuic),
                 5 => Some(Protocol::Naive),
+                6 => Some(Protocol::AnyTls),
                 _ => None,
             })
             .collect();
@@ -252,6 +254,7 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
                     "Hysteria2",
                     "Tuic",
                     "Naive (sing-box)",
+                    "AnyTLS (sing-box)",
                 ];
                 let chosen = multi_select("选择要启用的协议组合(空格多选,回车确认)", &proto_items);
                 let protocols: Vec<Protocol> = chosen
@@ -262,6 +265,8 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
                         2 => Some(Protocol::Trojan),
                         3 => Some(Protocol::Hysteria2),
                         4 => Some(Protocol::Tuic),
+                        5 => Some(Protocol::Naive),
+                        6 => Some(Protocol::AnyTls),
                         _ => None,
                     })
                     .collect();
@@ -370,11 +375,8 @@ fn user_menu(config: &Path) -> anyhow::Result<()> {
                     &["vless", "vmess", "trojan", "hysteria2", "tuic", "naive"],
                     0,
                 );
-                let transport = if proto == "vless" {
-                    "tcp".to_string() // Reality 强制 tcp,菜单直接定
-                } else {
-                    select_one("传输层", &["tcp", "ws", "grpc", "xhttp"], 0)
-                };
+                let transport =
+                    select_one("传输层", &["tcp", "ws", "grpc", "xhttp", "httpupgrade"], 0);
                 commands::user::add(config, &name, port, &proto, &transport, false)?;
             }
             Some(1) => commands::user::list(config)?,

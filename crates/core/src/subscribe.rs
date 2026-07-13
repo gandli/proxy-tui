@@ -21,6 +21,7 @@ fn link_type(t: &Transport) -> &'static str {
         Transport::Ws => "ws",
         Transport::Grpc => "grpc",
         Transport::Xhttp => "xhttp",
+        Transport::HttpUpgrade => "httpupgrade",
     }
 }
 
@@ -80,6 +81,10 @@ pub fn gen_user(user: &User, spec: &Spec) -> Result<String, Error> {
         Protocol::Naive => format!(
             "naive+https://{}@{}:{}?sni={}#{}",
             user.uuid, d, user.port, d, user.name
+        ),
+        Protocol::AnyTls => format!(
+            "anytls://{}:{}@{}:{}?sni={}#{}",
+            user.uuid, user.uuid, d, user.port, d, user.name
         ),
     };
     Ok(link)
