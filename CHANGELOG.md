@@ -21,6 +21,7 @@
 - 依赖审计（cargo audit）回归无 vulnerability，仅 2 个 unmaintained 传递依赖（ureq 方案因 rustls-webpki RUSTSEC-2026 漏洞已弃用，改 curl + Executor 抽象）
 
 ### Fixed
+- fix(ci): release job 语义化版本 tag + 去重 (#47)
 - fix(ci): changelog.yml grep 防选项解析 bug + 端到端验证 (#45)
 - **root-optional 范式补齐（PR #34）**：`systemctl --user`（非 root 内核启停）+ `ACME_HOME` 改 root-optional（证书签发/续期非 root 可用）
 - **nginx 渲染 domain 校验（PR #36）**：`render/nginx.rs` 加 `sanitize_domain()`，防配置注入/路径穿越（与 `require_reality_keys` 同渲染期校验范式）
