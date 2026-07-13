@@ -29,8 +29,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 去重:编号已记录则跳过
-          if grep -q "(#${PR_NUM})" CHANGELOG.md; then
+          # 去重:编号已记录则跳过(-- 防止 PR_NUM 被当选项,虽然数字不会)
+          if grep -qF -- "(#${PR_NUM})" CHANGELOG.md; then
             echo "PR #${PR_NUM} 已在 CHANGELOG,跳过"
             exit 0
           fi
@@ -52,8 +52,8 @@ jobs:
           ' CHANGELOG.md > CHANGELOG.tmp
           mv CHANGELOG.tmp CHANGELOG.md
 
-          # 若 Unreleased 段尚无该 Section(极端情况),退化为追加到文件头下方
-          if ! grep -q "${ENTRY}" CHANGELOG.md; then
+          # 验证插入成功(固定字符串匹配,-- 防止 ENTRY 以 - 开头被当选项)
+          if ! grep -qF -- "${ENTRY}" CHANGELOG.md; then
             echo "插入失败,跳过"
             exit 0
           fi
