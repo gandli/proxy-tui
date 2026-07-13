@@ -16,10 +16,11 @@ pub mod spec;
 pub mod subscribe;
 pub mod systemd;
 pub mod tls;
+pub mod update;
+pub use spec::{Cores, PortHopping, Protocol, Spec, Transport, User};
 
 pub use core::plan;
 pub use error::Error;
-pub use spec::{Cores, PortHopping, Protocol, Spec, Transport, User};
 
 use std::path::Path;
 

@@ -15,6 +15,7 @@ thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ureq = { version = "2", default-features = false, features = ["rustls", "json"] }
 
 # 测试栈 (2026 实践)
 assert_cmd = "2"
