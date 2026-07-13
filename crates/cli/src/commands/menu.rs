@@ -456,6 +456,8 @@ fn route_menu(config: &Path) -> anyhow::Result<()> {
             "广告拦截 开/关",
             "BT 阻断 开/关",
             "端口跳跃 开/关",
+            "导入机场节点 (custom_outbounds)",
+            "自定义路由规则 (extra_routing_rules)",
             "查看当前规则",
             "返回",
         ];
@@ -502,8 +504,43 @@ fn route_menu(config: &Path) -> anyhow::Result<()> {
                     }
                 }
             }
-            Some(6) => commands::route::run(config, "list", None)?,
-            Some(7) | None => break,
+            Some(6) => {
+                // 导入机场节点:粘贴出站 JSON(一行一个出站对象),追加到 custom_outbounds
+                // (JSON 合法性由渲染层校验;此处不重复,避免 cli 依赖 serde_json)
+                let mut spec = load_spec(config)?;
+                loop {
+                    let raw = prompt_text("粘贴机场出站 JSON(空行结束,可多次添加)", "");
+                    if raw.trim().is_empty() {
+                        break;
+                    }
+                    spec.rules.custom_outbounds.push(raw.trim().to_string());
+                    println!(
+                        "已添加 1 个机场出站(共 {})",
+                        spec.rules.custom_outbounds.len()
+                    );
+                }
+                save_spec(&spec, config)?;
+                println!("机场节点已保存(apply 后生效)");
+            }
+            Some(7) => {
+                // 自定义路由规则:粘贴 routing rule JSON,追加到 extra_routing_rules
+                let mut spec = load_spec(config)?;
+                loop {
+                    let raw = prompt_text("粘贴路由规则 JSON(空行结束,可多次添加)", "");
+                    if raw.trim().is_empty() {
+                        break;
+                    }
+                    spec.rules.extra_routing_rules.push(raw.trim().to_string());
+                    println!(
+                        "已添加 1 条路由规则(共 {})",
+                        spec.rules.extra_routing_rules.len()
+                    );
+                }
+                save_spec(&spec, config)?;
+                println!("路由规则已保存(apply 后生效)");
+            }
+            Some(8) => commands::route::run(config, "list", None)?,
+            Some(9) | None => break,
             _ => {}
         }
     }
