@@ -17,16 +17,18 @@ fn inbound_for(
 ) -> Result<Option<serde_json::Value>, Error> {
     match (&u.protocol, u.reality, &u.transport) {
         (Protocol::Vless, true, transport) => Ok(Some(vless_reality(u, spec, transport)?)),
-        (Protocol::Vless, false, transport) => Ok(Some(vless_plain(u, transport))),
-        (Protocol::Vmess, _, _) => Ok(Some(vmess_ws(u))),
-        (Protocol::Trojan, _, transport) => Ok(Some(trojan_tls(u, transport, cert_cer, cert_key))),
+        (Protocol::Vless, false, transport) => Ok(Some(vless_plain(u, spec, transport))),
+        (Protocol::Vmess, _, _) => Ok(Some(vmess_ws(u, spec))),
+        (Protocol::Trojan, _, transport) => {
+            Ok(Some(trojan_tls(u, spec, transport, cert_cer, cert_key)))
+        }
         // Hysteria2/Tuic/Naive 不在 Xray 侧渲染
         _ => Ok(None),
     }
 }
 
 /// 生成 streamSettings(按传输层)。
-fn stream_for(transport: &Transport) -> serde_json::Value {
+fn stream_for(spec: &Spec, transport: &Transport) -> serde_json::Value {
     match transport {
         Transport::Tcp => serde_json::json!({ "network": "tcp" }),
         Transport::Ws => serde_json::json!({ "network": "ws", "wsSettings": { "path": "/ws" } }),
@@ -37,6 +39,10 @@ fn stream_for(transport: &Transport) -> serde_json::Value {
         Transport::Xhttp => serde_json::json!({
             "network": "xhttp",
             "xhttpSettings": { "path": "/xhttp" }
+        }),
+        Transport::HttpUpgrade => serde_json::json!({
+            "network": "httpupgrade",
+            "httpupgradeSettings": { "path": "/httpupgrade", "host": spec.domain, "sni": spec.domain }
         }),
     }
 }
@@ -49,7 +55,7 @@ fn vless_reality(u: &User, spec: &Spec, transport: &Transport) -> Result<serde_j
     } else {
         sid.to_string()
     };
-    let mut stream = stream_for(transport);
+    let mut stream = stream_for(spec, transport);
     stream["security"] = serde_json::json!("reality");
     stream["realitySettings"] = serde_json::json!({
         "dest": format!("{}:443", spec.domain),
@@ -70,7 +76,7 @@ fn vless_reality(u: &User, spec: &Spec, transport: &Transport) -> Result<serde_j
     }))
 }
 
-fn vless_plain(u: &User, transport: &Transport) -> serde_json::Value {
+fn vless_plain(u: &User, spec: &Spec, transport: &Transport) -> serde_json::Value {
     serde_json::json!({
         "listen": "0.0.0.0",
         "port": u.port,
@@ -79,12 +85,24 @@ fn vless_plain(u: &User, transport: &Transport) -> serde_json::Value {
             "clients": [{ "id": u.uuid, "level": 0 }],
             "decryption": "none"
         },
-        "streamSettings": stream_for(transport),
+        "streamSettings": stream_for(spec, transport),
         "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
     })
 }
 
-fn vmess_ws(u: &User) -> serde_json::Value {
+fn vmess_ws(u: &User, spec: &Spec) -> serde_json::Value {
+    // VMess 默认走 WS(对标 v2ray-agent VMess_WS);仅用户显式选 HttpUpgrade 时用之
+    let transport = if matches!(u.transport, Transport::HttpUpgrade) {
+        Transport::HttpUpgrade
+    } else {
+        Transport::Ws
+    };
+    let mut stream = stream_for(spec, &transport);
+    // vmess 的 ws/httpupgrade 用用户 id 作 path(区分多用户)
+    if matches!(transport, Transport::Ws | Transport::HttpUpgrade) {
+        stream["wsSettings"]["path"] = serde_json::json!(format!("/{}", u.id));
+        stream["httpupgradeSettings"]["path"] = serde_json::json!(format!("/{}", u.id));
+    }
     serde_json::json!({
         "listen": "0.0.0.0",
         "port": u.port,
@@ -92,21 +110,19 @@ fn vmess_ws(u: &User) -> serde_json::Value {
         "settings": {
             "clients": [{ "id": u.uuid, "alterId": 0, "level": 0 }]
         },
-        "streamSettings": {
-            "network": "ws",
-            "wsSettings": { "path": format!("/{}", u.id) }
-        },
+        "streamSettings": stream,
         "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
     })
 }
 
 fn trojan_tls(
     u: &User,
+    spec: &Spec,
     transport: &Transport,
     cert_cer: &str,
     cert_key: &str,
 ) -> serde_json::Value {
-    let mut stream = stream_for(transport);
+    let mut stream = stream_for(spec, transport);
     stream["security"] = serde_json::json!("tls");
     stream["tlsSettings"] = serde_json::json!({
         "certificates": [{
@@ -238,6 +254,45 @@ mod tests {
         let ib = &v["inbounds"][0];
         assert_eq!(ib["protocol"], "trojan");
         assert_eq!(ib["streamSettings"]["security"], "tls");
+    }
+
+    #[test]
+    fn render_vmess_httpupgrade_inbound() {
+        // 对标 v2ray-agent VMess_HTTPUpgrade:VMess + httpupgrade 传输
+        let mut spec = Spec::default_for("x.com");
+        spec.users.push(User::new(
+            "v",
+            Protocol::Vmess,
+            2053,
+            false,
+            Transport::HttpUpgrade,
+        ));
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
+        let ib = &v["inbounds"][0];
+        assert_eq!(ib["protocol"], "vmess");
+        assert_eq!(ib["streamSettings"]["network"], "httpupgrade");
+        // httpupgrade 用用户 id 作 path(区分多用户,对标 v2ray-agent VMess_HTTPUpgrade)
+        assert!(ib["streamSettings"]["httpupgradeSettings"]["path"]
+            .as_str()
+            .unwrap()
+            .starts_with('/'));
+    }
+
+    #[test]
+    fn render_vless_xhttp_inbound() {
+        // VLESS + XHTTP 传输(抗探测,对标 v2ray-agent VLESS_XHTTP)
+        let mut spec = Spec::default_for("x.com");
+        spec.users.push(User::new(
+            "v",
+            Protocol::Vless,
+            443,
+            false,
+            Transport::Xhttp,
+        ));
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
+        let ib = &v["inbounds"][0];
+        assert_eq!(ib["protocol"], "vless");
+        assert_eq!(ib["streamSettings"]["network"], "xhttp");
     }
 
     #[test]

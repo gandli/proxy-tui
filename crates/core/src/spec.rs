@@ -151,6 +151,7 @@ pub enum Protocol {
     Hysteria2,
     Tuic,
     Naive,
+    AnyTls,
 }
 
 /// 传输层(决定 streamSettings.network / grpc / xhttp)。
@@ -162,6 +163,7 @@ pub enum Transport {
     Ws,
     Grpc,
     Xhttp,
+    HttpUpgrade,
 }
 
 impl std::str::FromStr for Transport {
@@ -172,6 +174,7 @@ impl std::str::FromStr for Transport {
             "ws" | "websocket" => Ok(Transport::Ws),
             "grpc" => Ok(Transport::Grpc),
             "xhttp" => Ok(Transport::Xhttp),
+            "httpupgrade" | "h2" => Ok(Transport::HttpUpgrade),
             other => Err(format!("未知传输: {other}")),
         }
     }
@@ -184,6 +187,7 @@ impl std::fmt::Display for Transport {
             Transport::Ws => "ws",
             Transport::Grpc => "grpc",
             Transport::Xhttp => "xhttp",
+            Transport::HttpUpgrade => "httpupgrade",
         };
         f.write_str(s)
     }
@@ -199,6 +203,7 @@ impl std::str::FromStr for Protocol {
             "hysteria2" | "hy2" => Ok(Protocol::Hysteria2),
             "tuic" => Ok(Protocol::Tuic),
             "naive" => Ok(Protocol::Naive),
+            "anytls" => Ok(Protocol::AnyTls),
             other => Err(format!("未知协议: {other}")),
         }
     }
@@ -213,6 +218,7 @@ impl std::fmt::Display for Protocol {
             Protocol::Hysteria2 => "hysteria2",
             Protocol::Tuic => "tuic",
             Protocol::Naive => "naive",
+            Protocol::AnyTls => "anytls",
         };
         f.write_str(s)
     }
@@ -271,6 +277,10 @@ impl Spec {
                 Protocol::Naive => {
                     spec.cores.singbox = true;
                     spec.add_user("naive", Protocol::Naive, 8448, false);
+                }
+                Protocol::AnyTls => {
+                    spec.cores.singbox = true;
+                    spec.add_user("anytls", Protocol::AnyTls, 8443, false);
                 }
             }
         }

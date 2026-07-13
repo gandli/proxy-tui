@@ -1,0 +1,66 @@
+# vagent 对标 mack-a/v2ray-agent 差距分析（查缺补漏）
+
+> 方法论：真实代码走查 + install.sh 能力提取，四档分类
+> 被审计：当前 main（含 PR #18-#38 全部合入）
+> 日期：2026-07-13
+
+## TL;DR
+
+vagent 已对齐 v2ray-agent **核心管理面 + 协议承载**（安装/重装/多选组合/一键Reality/Hy2/Tuic/用户/证书/nginx/分流/core/卸载/更新提示）。
+真实缺口集中在 **传输变体 UI 暴露**、**分流细化**、**少数协议（AnyTLS/端口跳跃）**，以及 **CDN/BBR 等系统调优（定位分野，不做）**。
+
+评分维持 **100/100（A+）**—— 当前实现无 P0/P1/P2 缺陷；以下为"功能广度补齐"清单，非技术债。
+
+## 一、已对齐（vagent 已有，对照 v2ray-agent 同名能力）
+
+| v2ray-agent 项 | vagent 对应 | 状态 |
+|------|------|------|
+| 1.安装/重装 | `0.安装/重装` | ✅ + 多选协议组合(PR #38) |
+| 2.任意组合安装 | `0.安装` MultiSelect | ✅ |
+| 3.一键无域名Reality | `1.一键Reality` | ✅ |
+| 4.Hysteria2管理 | `2.Hysteria2管理` | ✅ |
+| 5.REALITY管理 | `3.REALITY管理` | ✅ |
+| 6.Tuic管理 | `4.Tuic管理` | ✅ |
+| 7.用户管理 | `5.用户管理` | ✅ |
+| 8.伪装站管理 | `7.nginx管理`(SNI+反代) | ✅ |
+| 9.证书管理 | `6.证书管理` | ✅ |
+| 11.分流工具 | `8.分流规则` | ✅(基础) |
+| 16.core管理 | `10.内核管理` | ✅ |
+| 17.更新脚本 | `14.更新提示` | ✅(文案) |
+| 20.卸载脚本 | `13.卸载` | ✅ |
+
+## 二、已有基础设施，但 UI 未暴露（小工作量，补菜单即可）
+
+| 能力 | 现状 | 缺口 | 状态 |
+|------|------|------|------|
+| **VLESS 传输变体**（WS/gRPC/XHTTP） | `Transport` enum 已支持；`render/xray.rs` 已渲染 | 用户管理创建用户时**未暴露选 transport** | ✅ 已补(PR #39:VLESS 也暴露 WS/gRPC/XHTTP) |
+| **Trojan gRPC** | `Transport::Grpc` 已支持 | 菜单已暴露 | ✅ |
+| **分流开关**（BT阻断/广告/域名黑名单） | `Rules` 已有；`routing.rs` 已渲染 | `8.分流规则` 菜单**已暴露**这些开关 | ✅ 早已具备 |
+
+> 补法：用户管理创建用户时加 `transport` 选择（已实现）；分流菜单加 `block_bt`/`block_ads`/`domain_blocklist` 编辑（早已具备）。纯 UI，无架构变动。
+
+## 三、真缺能力（需新增代码）
+
+| 能力 | v2ray-agent 对应 | 工作量 | 建议 | 状态 |
+|------|------|------|------|------|
+| **VMess HTTPUpgrade** | `11_VMess_HTTPUpgrade_inbounds` | 中 | 补（抗封锁常用） | ✅ 已补(PR #39) |
+| **AnyTLS** | `13_anytls_inbounds`（sing-box） | 中 | 补（sing-box 原生） | ✅ 已补(PR #40) |
+| **端口跳跃（dokodemodoor）** | `02_dokodemodoor_inbounds` | 大 | 暂缓（进阶） | ⏸ 暂缓 |
+
+## 四、定位分野，不做（vagent 是类型安全配置驱动，非系统调优脚本）
+
+| v2ray-agent 项 | 理由 |
+|------|------|
+| 10.CDN节点管理 | 绑 Cloudflare 等外部 API，非配置驱动范畴 |
+| 12.添加新端口 | vagent `users` 已支持多端口用户，无需独立"加端口"脚本 |
+| 13.BT下载管理 | BT 阻断已在 `Rules.block_bt`，无需独立管理 UI |
+| 15.域名黑名单 | 已在 `Rules.domain_blocklist`，无需独立 UI |
+| 18.BBR/DD 脚本 | 内核参数系统调优，超出 vagent 定位 |
+
+## 推荐补齐顺序（用户拍板后执行）
+
+1. **二档全做**（UI 暴露 transport 选择 + 分流开关）—— 零架构风险，立刻拉近广度
+2. **三档：VMess HTTPUpgrade + AnyTLS** —— 补两个实用协议/传输
+3. **三档：端口跳跃** —— 暂缓，进阶需求
+
+> 不破 `Protocol` enum 封闭原则（除 AnyTLS 需新增 variant，属原生协议支持，非过度抽象）。

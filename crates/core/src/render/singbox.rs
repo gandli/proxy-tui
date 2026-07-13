@@ -12,6 +12,8 @@ fn inbound_for(u: &User, cert_cer: &str, cert_key: &str) -> Option<serde_json::V
     match (&u.protocol, &u.transport) {
         (Protocol::Hysteria2, _) => Some(hysteria2(u, cert_cer, cert_key)),
         (Protocol::Tuic, _) => Some(tuic(u, cert_cer, cert_key)),
+        (Protocol::Naive, _) => Some(naive(u, cert_cer, cert_key)),
+        (Protocol::AnyTls, _) => Some(anytls(u, cert_cer, cert_key)),
         _ => None,
     }
 }
@@ -42,6 +44,36 @@ fn tuic(u: &User, cert_cer: &str, cert_key: &str) -> serde_json::Value {
         "tls": {
             "enabled": true,
             "alpn": ["h3"],
+            "certificate_path": cert_cer,
+            "key_path": cert_key
+        }
+    })
+}
+
+fn naive(u: &User, cert_cer: &str, cert_key: &str) -> serde_json::Value {
+    json!({
+        "type": "naive",
+        "tag": format!("naive-{}", u.id),
+        "listen": "::",
+        "listen_port": u.port,
+        "users": [{ "username": u.uuid, "password": u.uuid }],
+        "tls": {
+            "enabled": true,
+            "certificate_path": cert_cer,
+            "key_path": cert_key
+        }
+    })
+}
+
+fn anytls(u: &User, cert_cer: &str, cert_key: &str) -> serde_json::Value {
+    json!({
+        "type": "anytls",
+        "tag": format!("anytls-{}", u.id),
+        "listen": "::",
+        "listen_port": u.port,
+        "users": [{ "username": u.uuid, "password": u.uuid }],
+        "tls": {
+            "enabled": true,
             "certificate_path": cert_cer,
             "key_path": cert_key
         }
@@ -120,6 +152,34 @@ mod tests {
             tags.iter().any(|t| t.starts_with("tuic-")),
             "应有 tuic- inbound: {tags:?}"
         );
+    }
+
+    #[test]
+    fn renders_anytls_inbound() {
+        // 对标 v2ray-agent AnyTLS(13_anytls_inbounds):sing-box 原生协议
+        let mut spec = Spec::default_for("x.com");
+        spec.users.push(User::new(
+            "a",
+            Protocol::AnyTls,
+            8443,
+            false,
+            Transport::Tcp,
+        ));
+        let v = render(&spec, Path::new("/etc/vagent/spec.toml")).unwrap();
+        let ib = v["inbounds"].as_array().unwrap();
+        assert!(
+            ib.iter()
+                .any(|x| x["type"] == "anytls" && x["listen_port"] == 8443),
+            "应有 anytls inbound: {ib:?}"
+        );
+    }
+
+    #[test]
+    fn default_for_protocols_includes_anytls() {
+        let protos = [Protocol::AnyTls];
+        let s = Spec::default_for_protocols("x.com", &protos);
+        assert!(s.cores.singbox);
+        assert!(s.users.iter().any(|u| u.protocol == Protocol::AnyTls));
     }
 
     #[test]
