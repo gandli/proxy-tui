@@ -7,6 +7,7 @@ pub mod download;
 pub mod error;
 pub mod executor;
 pub mod exit;
+pub mod firewall;
 pub mod reality;
 pub mod reality_scan;
 pub mod render;
