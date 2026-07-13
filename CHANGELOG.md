@@ -15,7 +15,9 @@
 - 端口跳跃（dokodemo-door）：真实 inbound 改 127.0.0.1 + dokodemo-door 跳跃入口；订阅链接用跳端口（PR #40）
 - 防火墙自动化开放端口段：apply 阶段 firewalld/ufw/iptables 自动开放（端口跳跃开箱即用）（PR #41）
 - 分流菜单录入扩展字段：导入机场节点（custom_outbounds）+ 自定义路由规则（extra_routing_rules）UI 闭环（PR #42）
-- GitHub Action 自动更新 CHANGELOG（合并 PR 追加到 Unreleased 段）
+- GitHub Action 自动更新 CHANGELOG（合并 PR 追加到 Unreleased 段）（PR #43）
+- 菜单「更新提示」补真实版本检查：查 GitHub Releases 最新版本比对本地 `--version`（PR #46）
+- 依赖审计（cargo audit）回归无 vulnerability，仅 2 个 unmaintained 传递依赖（ureq 方案因 rustls-webpki RUSTSEC-2026 漏洞已弃用，改 curl + Executor 抽象）
 
 ### Fixed
 - fix(ci): changelog.yml grep 防选项解析 bug + 端到端验证 (#45)

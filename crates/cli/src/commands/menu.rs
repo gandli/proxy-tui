@@ -323,15 +323,18 @@ pub fn run(config: &Path) -> anyhow::Result<()> {
                 commands::uninstall::run(purge)?;
             }
             Some(14) => {
+                use vagent_core::executor::RealExecutor;
                 use vagent_core::update::{check_update, GitHubReleases, UpdateStatus};
                 println!("== 更新检查 ==");
                 println!("当前版本: {}", env!("CARGO_PKG_VERSION"));
                 let local = env!("CARGO_PKG_VERSION");
+                let ex = RealExecutor;
                 match check_update(
                     local,
                     &GitHubReleases {
                         repo: "gandli/vagent".to_string(),
                     },
+                    &ex,
                 ) {
                     UpdateStatus::UpToDate => println!("✅ 已是最新版本。"),
                     UpdateStatus::NewerAvailable { version } => {
