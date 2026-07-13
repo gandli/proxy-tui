@@ -156,6 +156,28 @@ fn apply_with_missing_config_exits_nonzero() {
 }
 
 #[test]
+fn route_menu_imports_airport_outbound() {
+    // 分流菜单导入机场节点(custom_outbounds)→ 落盘 spec
+    let tmp = tempdir().unwrap();
+    let cfg = tmp.path().join("vagent").join("spec.toml");
+    // 首跑:NONE(不选协议);主菜单 8=分流 → route_menu 6=导入机场 → 粘贴 JSON → 空行结束 → 9=返回 → 15=退出
+    let input = "NONE\n8\n6\n{\"protocol\":\"vless\",\"tag\":\"airport\",\"settings\":{\"vnext\":[{\"address\":\"hk.airport.com\",\"port\":443,\"users\":[{\"id\":\"uuid-here\"}]}]}}\n\n9\n15\n";
+    let mut cmd = Command::cargo_bin("vagent").unwrap();
+    let output = cmd
+        .env("HOME", tmp.path())
+        .env("VAGENT_CONFIG", &cfg)
+        .env("VAGENT_TEST_INPUT", input)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "导入机场节点应输出成功");
+    let content = std::fs::read_to_string(&cfg).expect("spec.toml 应已生成");
+    assert!(
+        content.contains("hk.airport.com"),
+        "spec.custom_outbounds 应含机场节点 JSON: {content}"
+    );
+}
+
+#[test]
 fn init_with_multi_protocol_selection() {
     // 安装时多选协议组合(对齐 v2ray-agent 任意组合):首跑用 `0,3,4` 选 VLESS+Hysteria2+Tuic
     // → 生成的 spec 应含 3 个用户 + xray/singbox 双核开启
