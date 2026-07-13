@@ -10,6 +10,12 @@
 - 安装分支版本号改为交互输入（与内核管理一致，不再硬编码 `1.8.23`）
 - CI 新增 `audit` job 跑 `cargo audit` 供应链审计
 - **nginx 管理（方案 1 root VPS 标准路径，PR #35）**：`7. nginx 管理` 子菜单装 nginx(apt/apk) + 生成 443→本机 8443 反代配置 + 可选伪装站 SNI + reload；`Spec.nginx` 字段（`reverse_proxy`/`reverse_port`/`sni_proxy`）
+- 安装时多选协议组合（MultiSelect，对齐 v2ray-agent 任意组合安装）（PR #38）
+- 协议传输变体补全：VLESS 暴露 WS/gRPC/XHTTP + VMess HTTPUpgrade；AnyTLS 原生协议（sing-box 渲染）（PR #39）
+- 端口跳跃（dokodemo-door）：真实 inbound 改 127.0.0.1 + dokodemo-door 跳跃入口；订阅链接用跳端口（PR #40）
+- 防火墙自动化开放端口段：apply 阶段 firewalld/ufw/iptables 自动开放（端口跳跃开箱即用）（PR #41）
+- 分流菜单录入扩展字段：导入机场节点（custom_outbounds）+ 自定义路由规则（extra_routing_rules）UI 闭环（PR #42）
+- GitHub Action 自动更新 CHANGELOG（合并 PR 追加到 Unreleased 段）
 
 ### Fixed
 - **root-optional 范式补齐（PR #34）**：`systemctl --user`（非 root 内核启停）+ `ACME_HOME` 改 root-optional（证书签发/续期非 root 可用）
