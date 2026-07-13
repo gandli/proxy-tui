@@ -18,6 +18,7 @@
 - GitHub Action 自动更新 CHANGELOG（合并 PR 追加到 Unreleased 段）
 
 ### Fixed
+- fix(ci): changelog.yml grep 防选项解析 bug + 端到端验证 (#45)
 - **root-optional 范式补齐（PR #34）**：`systemctl --user`（非 root 内核启停）+ `ACME_HOME` 改 root-optional（证书签发/续期非 root 可用）
 - **nginx 渲染 domain 校验（PR #36）**：`render/nginx.rs` 加 `sanitize_domain()`，防配置注入/路径穿越（与 `require_reality_keys` 同渲染期校验范式）
 - 菜单项标签加语义说明（区分一键 Reality / REALITY 管理）
